@@ -128,8 +128,6 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         }
 
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        int chunkBottomY = chunk.getMinBuildHeight();
-        int chunkTopY = chunk.getMaxBuildHeight() - 1;
 
         for (int dx = 0; dx < 16; dx++) {
             for (int dz = 0; dz < 16; dz++) {
@@ -141,9 +139,12 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
                 if (maxYSq < 0) continue;
 
                 int yBound = (int) Math.floor(Math.sqrt(maxYSq));
-                int startY = Math.max(-yBound, chunkBottomY);
-                int endY   = Math.min(yBound, chunkTopY);
-                if (startY > endY) continue;
+
+                // Use the full planet-geometry Y range, NOT clamped to
+                // the dimension height limits (0..15).  Blocks are
+                // stored in PlanetBlockStorage.
+                int startY = -yBound;
+                int endY   = yBound;
 
                 // Query biome from the chunk's noise-cell biome data
                 Biome columnBiome = null;

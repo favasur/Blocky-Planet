@@ -38,22 +38,19 @@ public abstract class LevelLoadingScreenMixin {
 
         ci.cancel();
 
-        int diameter = progressListener.getDiameter();
+        int cellSize = pixelSize + centerSizeDiv; // Vanilla: pixelSize=2 → cellSize=2
         int fullDiameter = progressListener.getFullDiameter();
-        int cellSize = pixelSize * 2 + 1;
-        int visualFull = fullDiameter * cellSize;
+        int stepSize = progressListener.getDiameter();
+        int visualFull = fullDiameter * stepSize;
 
         int xStart = centerX - visualFull / 2;
         int yStart = centerY - visualFull / 2;
         float radiusSq = (fullDiameter / 2.0f) * (fullDiameter / 2.0f);
         float halfFull = fullDiameter / 2.0f;
 
-        // Access the private statuses map via accessor mixin
         Long2ObjectOpenHashMap<ChunkStatus> statuses =
             ((StoringChunkProgressListenerAccessor) progressListener).getStatuses();
 
-        // Draw chunk progress cells — only within the circular radius
-        // (No border — the circle of colored cells is self-explanatory)
         for (int i = 0; i < fullDiameter; i++) {
             for (int j = 0; j < fullDiameter; j++) {
                 float dx = i - halfFull + 0.5f;
@@ -61,12 +58,10 @@ public abstract class LevelLoadingScreenMixin {
                 if (dx * dx + dz * dz > radiusSq) continue;
 
                 ChunkStatus status = statuses.get(ChunkPos.asLong(i, j));
-                int cellX = xStart + i * cellSize;
-                int cellY = yStart + j * cellSize;
-                int color = getStatusColor(status) | 0xFF000000;
-                guiGraphics.fill(cellX, cellY,
-                                 cellX + cellSize, cellY + cellSize,
-                                 color);
+                int cellX = xStart + i * stepSize;
+                int cellY = yStart + j * stepSize;
+                guiGraphics.fill(cellX, cellY, cellX + cellSize, cellY + cellSize,
+                                 getStatusColor(status));
             }
         }
     }
