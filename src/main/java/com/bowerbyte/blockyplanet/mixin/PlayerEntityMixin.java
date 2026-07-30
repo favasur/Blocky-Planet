@@ -1,7 +1,7 @@
 package com.bowerbyte.blockyplanet.mixin;
 
 import com.bowerbyte.blockyplanet.player.CustomGravity;
-import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -16,7 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * (detected via velocity changes). Player up-vector is smoothly rotated
  * to align with the planet surface.
  */
-@Mixin(PlayerEntity.class)
+@Mixin(Player.class)
 public class PlayerEntityMixin {
 
     @Unique
@@ -27,13 +27,13 @@ public class PlayerEntityMixin {
 
     @Inject(method = "tick", at = @At("TAIL"))
     private void onTick(CallbackInfo ci) {
-        PlayerEntity player = (PlayerEntity) (Object) this;
-        long gameTime = player.getWorld().getTime();
+        Player player = (Player) (Object) this;
+        long gameTime = player.level().getGameTime();
         if (gameTime == blockyPlanet_lastGravityTick) return;
         blockyPlanet_lastGravityTick = gameTime;
 
         // Detect jump press: velocity Y suddenly increases (from negative/zero to positive)
-        double currentVY = player.getVelocity().y;
+        double currentVY = player.getDeltaMovement().y;
         boolean jumpPressed = currentVY > 0.0 && blockyPlanet_prevVelocityY <= 0.0;
         blockyPlanet_prevVelocityY = currentVY;
 

@@ -2,8 +2,8 @@ package com.bowerbyte.blockyplanet.world.cube;
 
 import com.bowerbyte.blockyplanet.planet.Vector3d;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
+import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.Blocks;
 
 import java.util.Arrays;
 
@@ -41,7 +41,7 @@ public class PlanetBlockStorage {
     public BlockState getBlockState(int x, int y, int z) {
         int cx = x >> 4, cy = y >> 4, cz = z >> 4;
         BlockState[] blocks = cubes.get(key(cx, cy, cz));
-        if (blocks == null) return Blocks.AIR.getDefaultState();
+        if (blocks == null) return Blocks.AIR.defaultBlockState();
         return blocks[blockIndex(x, y, z)];
     }
 
@@ -51,7 +51,7 @@ public class PlanetBlockStorage {
         BlockState[] blocks = cubes.get(k);
         if (blocks == null) {
             blocks = new BlockState[4096];
-            Arrays.fill(blocks, Blocks.AIR.getDefaultState());
+            Arrays.fill(blocks, Blocks.AIR.defaultBlockState());
             cubes.put(k, blocks);
         }
         blocks[blockIndex(x, y, z)] = state;
@@ -98,6 +98,11 @@ public class PlanetBlockStorage {
 
     public boolean hasCube(int cx, int cy, int cz) {
         return cubes.containsKey(key(cx, cy, cz));
+    }
+
+    public boolean hasAnyInSection(int chunkX, int sectionY, int chunkZ) {
+        // Check the single cube at this Y level for this chunk's X,Z
+        return cubes.containsKey(key(chunkX, sectionY, chunkZ));
     }
 
     public void removeCube(int cx, int cy, int cz) {

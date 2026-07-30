@@ -8,22 +8,20 @@ import com.bowerbyte.blockyplanet.planet.Vector3d;
 import com.bowerbyte.blockyplanet.world.cube.PlanetBlockStorage;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.ChunkRegion;
-import net.minecraft.world.HeightLimitView;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.World;
-import net.minecraft.world.biome.source.BiomeAccess;
-import net.minecraft.world.biome.source.BiomeSource;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.gen.GenerationStep;
-import net.minecraft.world.gen.StructureAccessor;
-import net.minecraft.world.gen.chunk.Blender;
-import net.minecraft.world.gen.chunk.ChunkGenerator;
-import net.minecraft.world.gen.chunk.VerticalBlockSample;
-import net.minecraft.world.gen.noise.NoiseConfig;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.levelgen.Beardifier;
+import net.minecraft.world.level.levelgen.GenerationStep;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.RandomState;
+import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.structure.StructureSet;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -91,17 +89,13 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     }
 
     @Override
-    public void carve(ChunkRegion chunkRegion, long seed, NoiseConfig noiseConfig,
-                       BiomeAccess biomeAccess, StructureAccessor structureAccessor,
-                       Chunk chunk, GenerationStep.Carver carverStep) {}
+    public void applyCarvers(ChunkAccess chunk, GenerationStep.Carving carverStep, RandomState random, LevelHeightAccessor heightAccessor) {}
 
     @Override
-    public void buildSurface(ChunkRegion region, StructureAccessor structures,
-                              NoiseConfig noiseConfig, Chunk chunk) {}
+    public void buildSurface(ChunkAccess chunk, LevelHeightAccessor heightAccessor, RandomState random) {}
 
     @Override
-    public CompletableFuture<Chunk> populateNoise(Blender blender, NoiseConfig noiseConfig,
-                                                    StructureAccessor structureAccessor, Chunk chunk) {
+    public CompletableFuture<ChunkAccess> fillFromNoises(Blender blender, RandomState random, StructureSet structureSet, ChunkAccess chunk) {
         int chunkX = chunk.getPos().x;
         int chunkZ = chunk.getPos().z;
 
@@ -110,12 +104,12 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
         // Get the PlanetBlockStorage from the static world reference
         PlanetBlockStorage storage = null;
-        World world = BlockyPlanetMod.blockyWorld;
+        Level world = BlockyPlanetMod.blockyWorld;
         if (world != null) {
             storage = BlockyPlanetMod.getOrCreateStorage(world);
         }
 
-        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 
         for (int dx = 0; dx < 16; dx++) {
             for (int dz = 0; dz < 16; dz++) {
@@ -129,8 +123,8 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
                 int yBound = (int) Math.floor(Math.sqrt(maxYSq));
 
                 // Vanilla chunk bounds (for rendering)
-                int startY = Math.max(-yBound, chunk.getBottomY());
-                int endY   = Math.min(yBound, chunk.getTopY() - 1);
+                int startY = Math.max(-yBound, chunk.getMinBuildHeight());
+                int endY   = Math.min(yBound, chunk.getMaxBuildHeight() - 1);
 
                 // Full y-range (for PlanetBlockStorage — unbounded)
                 int fullStartY = -yBound;
@@ -178,7 +172,7 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         if (depthBelowSurface < 0) {
             double waterRadius = QuadSphere.planetRadius() * 0.95;
             if (alignedDist <= waterRadius && alignedDist > QuadSphere.getShellInnerRadius(0)) {
-                return Blocks.WATER.getDefaultState();
+                return Blocks.WATER.defaultBlockState();
             }
             return null;
         }
@@ -189,15 +183,15 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
         boolean isArctic = isArcticRegion(alignedPos);
         if (depthBelowSurface <= 1.0) {
-            return isArctic ? Blocks.SNOW_BLOCK.getDefaultState() : Blocks.GRASS_BLOCK.getDefaultState();
+            return isArctic ? Blocks.SNOW_BLOCK.defaultBlockState() : Blocks.GRASS_BLOCK.defaultBlockState();
         } else if (depthBelowSurface <= 4.0) {
-            if (alignedDist <= QuadSphere.planetRadius() * 0.97) return Blocks.SAND.getDefaultState();
-            return isArctic ? Blocks.SNOW_BLOCK.getDefaultState() : Blocks.DIRT.getDefaultState();
+            if (alignedDist <= QuadSphere.planetRadius() * 0.97) return Blocks.SAND.defaultBlockState();
+            return isArctic ? Blocks.SNOW_BLOCK.defaultBlockState() : Blocks.DIRT.defaultBlockState();
         } else {
             if (BlockyPlanetConfig.isInNetherRing(alignedDist)) {
                 return getNetherBlock(alignedPos, alignedDist, QuadSphere.planetRadius());
             }
-            return Blocks.STONE.getDefaultState();
+            return Blocks.STONE.defaultBlockState();
         }
     }
 
@@ -208,15 +202,15 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         double surfaceRadius = getSurfaceRadius(new Vector3d(x, y, z));
         double depth = surfaceRadius - distFromCenter;
         if (depth < 0) return null;
-        if (depth <= 1.0) return Blocks.GRASS_BLOCK.getDefaultState();
+        if (depth <= 1.0) return Blocks.GRASS_BLOCK.defaultBlockState();
         if (depth <= 4.0) {
             double sandRadius = planetRadius * 0.97;
-            return distFromCenter <= sandRadius ? Blocks.SAND.getDefaultState() : Blocks.DIRT.getDefaultState();
+            return distFromCenter <= sandRadius ? Blocks.SAND.defaultBlockState() : Blocks.DIRT.defaultBlockState();
         }
         if (BlockyPlanetConfig.isInNetherRing(distFromCenter)) {
             return getNetherBlock(new Vector3d(x, y, z), distFromCenter, planetRadius);
         }
-        return Blocks.STONE.getDefaultState();
+        return Blocks.STONE.defaultBlockState();
     }
 
     private BlockState getNetherBlock(Vector3d pos, double distFromCenter, double planetRadius) {
@@ -227,11 +221,11 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         double outer = BlockyPlanetConfig.getNetherOuterRadius(planetRadius);
         double thick = outer - inner;
         double depth = (distFromCenter - inner) / thick;
-        if (depth < 2.0 / thick || depth > 1.0 - 2.0 / thick) return Blocks.BEDROCK.getDefaultState();
+        if (depth < 2.0 / thick || depth > 1.0 - 2.0 / thick) return Blocks.BEDROCK.defaultBlockState();
         double caveThreshold = NetherBiomeHelper.isDenseBiome(biome) ? -0.1 : -0.4;
         if (noiseVal < caveThreshold) {
             double lavaThresh = NetherBiomeHelper.getLavaThreshold(biome);
-            return (depth < lavaThresh && noiseVal < -0.5) ? Blocks.LAVA.getDefaultState() : null;
+            return (depth < lavaThresh && noiseVal < -0.5) ? Blocks.LAVA.defaultBlockState() : null;
         }
         boolean nearCave = isNearCave(px, py, pz);
         if (nearCave && depth > 0.5) return NetherBiomeHelper.getCeilingBlock(biome);
@@ -267,19 +261,19 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     }
 
     @Override
-    public int getMinimumY() { return 0; }
+    public int getMinY() { return 0; }
 
     @Override
     public int getSeaLevel() { return 0; }
 
     @Override
-    public int getWorldHeight() { return 16; }
+    public int getGenDepth() { return 16; }
 
     @Override
-    public void populateEntities(ChunkRegion chunkRegion) {}
+    public void spawnOriginalMobs(LevelHeightAccessor heightAccessor) {}
 
     @Override
-    public int getHeight(int x, int z, Heightmap.Type heightmap, HeightLimitView world, NoiseConfig noiseConfig) {
+    public int getBaseHeight(int x, int z, Heightmap.Types heightmap, LevelHeightAccessor world, RandomState noiseConfig) {
         double planetR = QuadSphere.planetRadius();
         double distSq = (double) x * x + (double) z * z;
         if (distSq > planetR * planetR) return 0;
@@ -289,17 +283,10 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     }
 
     @Override
-    public VerticalBlockSample getColumnSample(int x, int z, HeightLimitView world, NoiseConfig noiseConfig) {
-        BlockState[] states = new BlockState[world.getHeight()];
-        for (int i = 0; i < states.length; i++) states[i] = Blocks.AIR.getDefaultState();
-        return new VerticalBlockSample(world.getBottomY(), states);
-    }
+    protected MapCodec<? extends ChunkGenerator> codec() { return CODEC; }
 
     @Override
-    protected MapCodec<? extends ChunkGenerator> getCodec() { return CODEC; }
-
-    @Override
-    public void getDebugHudText(List<String> text, NoiseConfig noiseConfig, BlockPos pos) {
+    public void addDebugScreenInfo(List<String> text, RandomState noiseConfig, BlockPos pos) {
         double planetRadius = QuadSphere.planetRadius();
         text.add("§6Blocky Planet (Cubic Mode)");
         text.add(String.format("§7Planet: §f%s ⌀  §7(%s radius)",
@@ -321,7 +308,7 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
             double offset = v.subtract(aligned).length();
             text.add(String.format("§7Addr: %s  §7offset: %.2f", addr, offset));
             // Show storage stats
-            World w = BlockyPlanetMod.blockyWorld;
+            Level w = BlockyPlanetMod.blockyWorld;
             if (w != null) {
                 PlanetBlockStorage s = BlockyPlanetMod.getOrCreateStorage(w);
                 text.add(String.format("§7Cubes in storage: §f%d", s.size()));

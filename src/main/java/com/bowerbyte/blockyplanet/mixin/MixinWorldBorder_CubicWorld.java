@@ -1,8 +1,8 @@
 package com.bowerbyte.blockyplanet.mixin;
 
 import com.bowerbyte.blockyplanet.BlockyPlanetMod;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.border.WorldBorder;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.border.WorldBorder;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -28,7 +28,7 @@ public abstract class MixinWorldBorder_CubicWorld {
      * {@link WorldBorder#contains(BlockPos)} — always true for Blocky Planet.
      */
     @Inject(
-        method = "contains(Lnet/minecraft/util/math/BlockPos;)Z",
+        method = "contains(Lnet/minecraft/core/BlockPos;)Z",
         at = @At("HEAD"),
         cancellable = true,
         require = 0

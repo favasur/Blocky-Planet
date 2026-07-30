@@ -6,7 +6,8 @@
   "mixins": [
     "PlayerEntityMixin",
     "MixinLevel_CubicWorld",
-    "MixinWorldBorder_CubicWorld"
+    "MixinWorldBorder_CubicWorld",
+    "MixinWorldChunk_CubicWorld"
   ],
   "injectors": {
     "defaultRequire": 1
