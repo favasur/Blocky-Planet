@@ -12,8 +12,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Mixin into {@link LevelLoadingScreen#drawChunkMap} to render the
- * chunk generation progress grid as a CIRCLE instead of a square
- * — same opaque visual style as vanilla, just clipped to a circle.
+ * chunk generation progress grid as a CIRCLE instead of a square.
+ *
+ * Cells are drawn large enough to fill the circle continuously
+ * (cellSize = stepSize), creating a smooth, solid-looking circle
+ * with colored region indicators instead of sparse 2px dots.
  */
 @Mixin(LevelLoadingScreen.class)
 public abstract class LevelLoadingScreenMixin {
@@ -32,7 +35,6 @@ public abstract class LevelLoadingScreenMixin {
 
         ci.cancel();
 
-        int cellSize = pixelSize + centerSizeDiv; // 2px cells (matches vanilla)
         int stepSize = progressProvider.getCenterSize();
         int fullSize = progressProvider.getSize();
         int visualFull = fullSize * stepSize;
@@ -48,7 +50,10 @@ public abstract class LevelLoadingScreenMixin {
         // 1. Solid dark background for the full square area
         context.fill(xStart, yStart, xEnd, yEnd, 0x4F000000);
 
-        // 2. Draw colored cells only within the circle
+        // 2. Draw cells filling the circle area (cellSize = stepSize = no gaps)
+        //    Full-size cells create a smooth solid-looking circle instead of
+        //    scattered 2px dots with 13px gaps.
+        int cellSize = stepSize;
         for (int i = 0; i < fullSize; i++) {
             for (int j = 0; j < fullSize; j++) {
                 int dx = i - radius;
@@ -61,33 +66,6 @@ public abstract class LevelLoadingScreenMixin {
                 context.fill(cellX, cellY, cellX + cellSize, cellY + cellSize,
                              getStatusColor(status));
             }
-        }
-
-        // 3. Draw a visible circular border (2px thick)
-        int borderColor = 0xFF4444AA;
-        int borderR = radius * stepSize + stepSize / 2; // edge of the grid
-
-        // Outer ring (r+1)
-        for (int px = -borderR - 1; px <= borderR + 1; px++) {
-            int py = (int) Math.round(Math.sqrt((borderR + 1) * (borderR + 1) - px * px));
-            int cx = centerX + px;
-            int cy = centerY + py;
-            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
-                context.fill(cx, cy, cx + 1, cy + 1, borderColor);
-            cy = centerY - py;
-            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
-                context.fill(cx, cy, cx + 1, cy + 1, borderColor);
-        }
-        // Inner ring (r)
-        for (int px = -borderR; px <= borderR; px++) {
-            int py = (int) Math.round(Math.sqrt(borderR * borderR - px * px));
-            int cx = centerX + px;
-            int cy = centerY + py;
-            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
-                context.fill(cx, cy, cx + 1, cy + 1, borderColor);
-            cy = centerY - py;
-            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
-                context.fill(cx, cy, cx + 1, cy + 1, borderColor);
         }
     }
 
