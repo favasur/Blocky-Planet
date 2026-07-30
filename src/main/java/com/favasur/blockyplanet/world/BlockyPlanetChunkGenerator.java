@@ -694,13 +694,23 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     // ─── Vanilla API overrides ────────────────────────────────────────────
 
     @Override
-    public int getMinimumY() { return 0; }
+    public int getMinimumY() {
+        // World bottom = -planetRadius - 128 blocks below the planet core.
+        // The World mixin (MixinWorld_HeightRange) returns the same value.
+        return -(int) QuadSphere.planetRadius() - 128;
+    }
 
     @Override
     public int getSeaLevel() { return 0; }
 
     @Override
-    public int getWorldHeight() { return 16; }
+    public int getWorldHeight() {
+        // Full planet diameter + 256 blocks margin for terrain noise.
+        // Must match MixinWorld_HeightRange.getHeight() to keep everything
+        // consistent and avoid "Empty height range" warnings that freeze
+        // world creation.
+        return (int) (QuadSphere.planetRadius() * 2 + 256);
+    }
 
     @Override
     public int getHeight(int x, int z, Heightmap.Type heightmap, HeightLimitView world, NoiseConfig noiseConfig) {

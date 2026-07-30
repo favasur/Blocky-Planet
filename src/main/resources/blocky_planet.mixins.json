@@ -9,7 +9,8 @@
     "MixinWorldBorder_CubicWorld",
     "MixinWorldChunk_CubicWorld",
     "MixinWorldChunk_UnloadCleanup",
-    "MixinHeightLimitView"
+    "MixinHeightLimitView",
+    "MixinWorld_HeightRange"
   ],
   "injectors": {
     "defaultRequire": 1
