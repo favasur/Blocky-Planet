@@ -1,7 +1,7 @@
 {
   "required": true,
   "minVersion": "0.8",
-  "package": "com.bowerbyte.blockyplanet.mixin",
+  "package": "com.favasur.blockyplanet.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "PlayerEntityMixin",
