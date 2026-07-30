@@ -8,6 +8,7 @@
     "MixinLevel_CubicWorld",
     "MixinWorldBorder_CubicWorld",
     "MixinWorldChunk_CubicWorld",
+    "MixinHeightLimitView",
     "ScreenAccessor",
     "StoringChunkProgressListenerAccessor"
   ],

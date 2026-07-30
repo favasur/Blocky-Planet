@@ -29,7 +29,6 @@ public class BlockyPlanetMod {
     public static final String MOD_ID = "blocky_planet";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-    public static final ResourceLocation DIMENSION_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "blocky_planet");
     public static final ResourceLocation CHUNK_GENERATOR_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "blocky_planet_generator");
 
     /** Whether Tellus (real Earth terrain) is loaded alongside us. */
@@ -66,8 +65,7 @@ public class BlockyPlanetMod {
         );
 
         NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onServerStarted);
-        NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onPlayerJoinLevel);
-        NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onPlayerRespawn);
+        // No teleport handlers — spawn position is set directly on the overworld
 
         BlockyPlanetModClient.init();
         NeoForge.EVENT_BUS.addListener(BlockyPlanetModClient::onScreenInit);
@@ -84,86 +82,41 @@ public class BlockyPlanetMod {
     }
 
     public static void onServerStarted(ServerStartedEvent event) {
-        // Capture Tellus overworld reference (used for surface block reading)
-        if (TELLUS_LOADED) {
-            for (ServerLevel sl : event.getServer().getAllLevels()) {
-                if (sl.dimension().location().equals(ResourceLocation.parse("minecraft:overworld"))) {
-                    tellusOverworld = sl;
-                    LOGGER.info("Captured Tellus overworld reference");
-                    break;
-                }
-            }
-        }
-
-        // Prefer our custom dimension, fall back to any world using our generator
+        // Capture the overworld and set spawn position
         for (ServerLevel sl : event.getServer().getAllLevels()) {
-            if (isCustomDimension(sl)) {
-                blockyWorld = sl;
-                LOGGER.info("Captured Blocky Planet custom dimension: {}", sl.dimension().location());
-                return;
-            }
-        }
-        // Fall back to overworld override
-        for (ServerLevel sl : event.getServer().getAllLevels()) {
-            if (isBlockyPlanetDimension(sl)) {
-                blockyWorld = sl;
-                LOGGER.info("Captured override world: {}", sl.dimension().location());
-                break;
-            }
-        }
+            if (!isBlockyPlanetDimension(sl)) continue;
 
-    }
+            blockyWorld = sl;
+            LOGGER.info("Blocky Planet world: {}", sl.dimension().location());
 
-    /**
-     * Teleport players to the planet surface when they join.
-     * Replaces setDefaultSpawnPos which fails at extreme Y values
-     * due to DimensionType logical height limits.
-     *
-     * Uses server.execute() to defer the teleport by one tick,
-     * avoiding "You logged in from another location" disconnect
-     * that occurs when teleporting during the login handshake.
-     */
-    public static void onPlayerJoinLevel(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event) {
-        if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return;
-        Level world = event.getLevel();
-        if (!isBlockyPlanetDimension(world)) return;
-
-        // Defer one tick to avoid login desync
-        ((ServerLevel) world).getServer().execute(() -> {
+            // Set the world spawn position at the planet surface.
+            // setDefaultSpawnPos should accept any Y value because our chunk
+            // generator overrides getMinY/getGenDepth/getSeaLevel, making the
+            // height range effectively unbounded.
             double pr = QuadSphere.planetRadius();
             int surfaceY = (int) Math.round(pr) + 16;
             BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
-            player.teleportTo((ServerLevel) world, 0.5, surfaceY, 0.5,
-                java.util.Set.of(), 0.0f, 0.0f);
-            LOGGER.info("Teleported player to planet surface at {}", spawnPos);
-        });
-    }
+            sl.setDefaultSpawnPos(spawnPos, 0);
+            LOGGER.info("Set world spawn to {}", spawnPos);
 
-    /**
-     * Teleport players back to the surface on respawn.
-     * EntityJoinLevelEvent also fires on respawn in some NeoForge versions,
-     * but this dedicated handler ensures coverage.
-     */
-    public static void onPlayerRespawn(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerRespawnEvent event) {
-        if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return;
-        if (!isBlockyPlanetDimension(player.level())) return;
-
-        double pr = QuadSphere.planetRadius();
-        int surfaceY = (int) Math.round(pr) + 16;
-        player.teleportTo((ServerLevel) player.level(), 0.5, surfaceY, 0.5,
-            java.util.Set.of(), 0.0f, 0.0f);
-        LOGGER.info("Teleported player back to planet surface on respawn at Y={}", surfaceY);
-    }
-
-    private static boolean isCustomDimension(Level world) {
-        return world != null && world.dimension().location().equals(DIMENSION_ID);
+            // Capture Tellus overworld reference
+            if (TELLUS_LOADED) {
+                for (ServerLevel overworld : event.getServer().getAllLevels()) {
+                    if (overworld.dimension().location().equals(ResourceLocation.parse("minecraft:overworld"))) {
+                        tellusOverworld = overworld;
+                        LOGGER.info("Captured Tellus overworld reference");
+                        break;
+                    }
+                }
+            }
+            break;
+        }
     }
 
     public static boolean isBlockyPlanetDimension(Level world) {
         if (world == null) return false;
         ResourceLocation id = world.dimension().location();
-        if (id.equals(DIMENSION_ID)) return true;
-        // Only check overworld if Tellus is NOT loaded
+        // Only the overworld uses our generator (when Tellus is not loaded)
         if (!TELLUS_LOADED && id.equals(ResourceLocation.parse("minecraft:overworld"))) return true;
         return false;
     }
