@@ -14,9 +14,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * Mixin into {@link LevelLoadingScreen#drawChunkMap} to render the
  * chunk generation progress grid as a CIRCLE instead of a square.
  *
- * Cells are drawn large enough to fill the circle continuously
- * (cellSize = stepSize), creating a smooth, solid-looking circle
- * with colored region indicators instead of sparse 2px dots.
+ * All cells are drawn in the full square area (same as vanilla).
+ * A smooth circular mask (drawn via Math.sqrt horizontal fills) is
+ * overlaid on the four corners to create a clean, truly round circle.
+ *
+ * Size is reduced to half of vanilla's full extent so the circle
+ * is more compact and cleaner-looking.
  */
 @Mixin(LevelLoadingScreen.class)
 public abstract class LevelLoadingScreenMixin {
@@ -37,35 +40,43 @@ public abstract class LevelLoadingScreenMixin {
 
         int stepSize = progressProvider.getCenterSize();
         int fullSize = progressProvider.getSize();
-        int visualFull = fullSize * stepSize;
+
+        // Use half the display size so the circle is compact
+        int displaySize = fullSize / 2;
+        int displayOffset = (fullSize - displaySize) / 2;
+        int visualFull = displaySize * stepSize;
 
         int xStart = centerX - visualFull / 2;
         int yStart = centerY - visualFull / 2;
         int xEnd = xStart + visualFull;
         int yEnd = yStart + visualFull;
 
-        int radius = fullSize / 2;
-        int radiusSq = radius * radius;
-
-        // 1. Solid dark background for the full square area
-        context.fill(xStart, yStart, xEnd, yEnd, 0x4F000000);
-
-        // 2. Draw cells filling the circle area (cellSize = stepSize = no gaps)
-        //    Full-size cells create a smooth solid-looking circle instead of
-        //    scattered 2px dots with 13px gaps.
-        int cellSize = stepSize;
-        for (int i = 0; i < fullSize; i++) {
-            for (int j = 0; j < fullSize; j++) {
-                int dx = i - radius;
-                int dz = j - radius;
-                if (dx * dx + dz * dz > radiusSq) continue;
-
-                ChunkStatus status = progressProvider.getChunkStatus(i, j);
+        // 1. Draw colored cells in the FULL square area (no circular clip)
+        //    cellSize = pixelSize + centerSizeDiv = 2 (matches vanilla)
+        int cellSize = pixelSize + centerSizeDiv;
+        for (int i = 0; i < displaySize; i++) {
+            for (int j = 0; j < displaySize; j++) {
+                ChunkStatus status = progressProvider.getChunkStatus(
+                    i + displayOffset, j + displayOffset);
                 int cellX = xStart + i * stepSize;
                 int cellY = yStart + j * stepSize;
                 context.fill(cellX, cellY, cellX + cellSize, cellY + cellSize,
                              getStatusColor(status));
             }
+        }
+
+        // 2. Smooth circular mask — hides cells outside the circle
+        //    Using Math.sqrt gives a clean mathematically-perfect circle edge,
+        //    unlike clipping square cells which creates jagged "pixel-round" edges.
+        int r = visualFull / 2;
+        int maskColor = 0xFF000000; // fully opaque black — matches screen bg
+        for (int px = -r; px <= r; px++) {
+            int limit = (int) Math.round(Math.sqrt(r * r - px * px));
+
+            // Top corner: fill from yStart up to the circle's top edge
+            context.fill(centerX + px, yStart, centerX + px + 1, centerY - limit, maskColor);
+            // Bottom corner: fill from the circle's bottom edge to yEnd
+            context.fill(centerX + px, centerY + limit + 1, centerX + px + 1, yEnd, maskColor);
         }
     }
 
