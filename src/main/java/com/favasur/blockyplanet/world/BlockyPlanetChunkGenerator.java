@@ -116,6 +116,12 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 
+        // ─── Only iterate Y within the chunk's valid height bounds ──────
+        // For Earth-sized planets (radius ~6.3M blocks), iterating -yBound..yBound
+        // would be 12.7M iterations per column = 3.2B per chunk = infinite hang.
+        int chunkBottomY = chunk.getMinBuildHeight();
+        int chunkTopY = chunk.getMaxBuildHeight() - 1;
+
         for (int dx = 0; dx < 16; dx++) {
             for (int dz = 0; dz < 16; dz++) {
                 int wx = chunkX * 16 + dx;
@@ -127,35 +133,27 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
                 int yBound = (int) Math.floor(Math.sqrt(maxYSq));
 
-                // Vanilla chunk bounds (for rendering)
-                int startY = Math.max(-yBound, chunk.getMinBuildHeight());
-                int endY   = Math.min(yBound, chunk.getMaxBuildHeight() - 1);
+                // Chunk-local Y range (intersection of sphere and chunk)
+                int startY = Math.max(-yBound, chunkBottomY);
+                int endY   = Math.min(yBound, chunkTopY);
+                if (startY > endY) continue;
 
-                // Full y-range (for PlanetBlockStorage — unbounded)
-                int fullStartY = -yBound;
-                int fullEndY   = yBound;
-
-                for (int wy = fullStartY; wy <= fullEndY; wy++) {
+                for (int wy = startY; wy <= endY; wy++) {
                     double distFromCenter = Math.sqrt(xyDistSq + (double) wy * wy);
                     BlockState state = getGravityAlignedBlock(wx, wy, wz, distFromCenter);
                     if (state != null) {
-                        // Always write to PlanetBlockStorage (unbounded Y)
+                        cursor.set(wx, wy, wz);
+                        chunk.setBlockState(cursor, state, false);
+
+                        // Also store in PlanetBlockStorage if available
                         if (storage != null) {
                             storage.setBlockState(wx, wy, wz, state);
-
-                            // Compute surface normal from the already-computed
-                            // BlockAddress for curved-block rendering.
                             BlockAddress addr = BlockAddress.fromWorldPosition(
                                 new Vector3d(wx, wy, wz));
                             Vector3d normal = addr.getSurfaceNormal();
                             if (normal != null) {
                                 storage.setNormal(wx, wy, wz, normal);
                             }
-                        }
-                        // Only write to vanilla chunk if within its height range
-                        if (wy >= startY && wy <= endY) {
-                            cursor.set(wx, wy, wz);
-                            chunk.setBlockState(cursor, state, false);
                         }
                     }
                 }

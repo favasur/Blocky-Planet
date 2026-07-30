@@ -29,7 +29,8 @@ public class BlockyPlanetMod {
     public static final ResourceLocation DIMENSION_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "blocky_planet");
     public static final ResourceLocation CHUNK_GENERATOR_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "blocky_planet_generator");
 
-    public static Level blockyWorld;
+    /** Volatile so worker threads see the update immediately. */
+    public static volatile Level blockyWorld;
 
     public static final Set<WorldBorder> BLOCKY_BORDERS = ConcurrentHashMap.newKeySet();
 
@@ -83,7 +84,8 @@ public class BlockyPlanetMod {
         return id.equals(DIMENSION_ID) || id.equals(ResourceLocation.parse("minecraft:overworld"));
     }
 
-    public static PlanetBlockStorage getOrCreateStorage(Level world) {
+    /** Synchronized because WeakHashMap is not thread-safe. */
+    public static synchronized PlanetBlockStorage getOrCreateStorage(Level world) {
         if (!isBlockyPlanetDimension(world)) {
             throw new IllegalStateException("Not a Blocky Planet dimension: " + world.dimension().location());
         }
