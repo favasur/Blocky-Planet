@@ -15,8 +15,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Mixin into {@link LevelLoadingScreen#renderChunks} to render the
- * chunk generation progress grid as a CIRCLE instead of a square
- * — same opaque visual style as vanilla, just clipped to a circle.
+ * chunk generation progress grid as a CIRCLE instead of a square.
+ *
+ * Cells fill the circle continuously (cellSize = stepSize), creating
+ * a smooth solid-looking circle instead of sparse 2px dots.
  */
 @Mixin(LevelLoadingScreen.class)
 public abstract class LevelLoadingScreenMixin {
@@ -35,7 +37,6 @@ public abstract class LevelLoadingScreenMixin {
 
         ci.cancel();
 
-        int cellSize = pixelSize + centerSizeDiv; // 2px cells (matches vanilla)
         int fullDiameter = progressListener.getFullDiameter();
         int stepSize = progressListener.getDiameter();
         int visualFull = fullDiameter * stepSize;
@@ -54,7 +55,8 @@ public abstract class LevelLoadingScreenMixin {
         Long2ObjectOpenHashMap<ChunkStatus> statuses =
             ((StoringChunkProgressListenerAccessor) progressListener).getStatuses();
 
-        // 2. Draw colored cells only within the circle
+        // 2. Draw full-size cells filling the circle (cellSize = stepSize = no gaps)
+        int cellSize = stepSize;
         for (int i = 0; i < fullDiameter; i++) {
             for (int j = 0; j < fullDiameter; j++) {
                 int dx = i - radius;
@@ -67,33 +69,6 @@ public abstract class LevelLoadingScreenMixin {
                 guiGraphics.fill(cellX, cellY, cellX + cellSize, cellY + cellSize,
                                  getStatusColor(status));
             }
-        }
-
-        // 3. Draw a visible circular border (2px thick)
-        int borderColor = 0xFF4444AA;
-        int borderR = radius * stepSize + stepSize / 2; // edge of the grid
-
-        // Outer ring (r+1)
-        for (int px = -borderR - 1; px <= borderR + 1; px++) {
-            int py = (int) Math.round(Math.sqrt((borderR + 1) * (borderR + 1) - px * px));
-            int cx = centerX + px;
-            int cy = centerY + py;
-            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
-                guiGraphics.fill(cx, cy, cx + 1, cy + 1, borderColor);
-            cy = centerY - py;
-            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
-                guiGraphics.fill(cx, cy, cx + 1, cy + 1, borderColor);
-        }
-        // Inner ring (r)
-        for (int px = -borderR; px <= borderR; px++) {
-            int py = (int) Math.round(Math.sqrt(borderR * borderR - px * px));
-            int cx = centerX + px;
-            int cy = centerY + py;
-            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
-                guiGraphics.fill(cx, cy, cx + 1, cy + 1, borderColor);
-            cy = centerY - py;
-            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
-                guiGraphics.fill(cx, cy, cx + 1, cy + 1, borderColor);
         }
     }
 
