@@ -43,13 +43,24 @@ public class BlockyPlanetMod implements ModInitializer {
             BlockyPlanetChunkGenerator.CODEC
         );
 
-        // Capture the Blocky Planet world reference when the server starts
+        // Capture the primary Blocky Planet world reference when the server starts
+        // Prefer our custom dimension, fall back to any world using our generator
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             for (ServerWorld sw : server.getWorlds()) {
-                if (isBlockyPlanetDimension(sw)) {
+                if (isCustomDimension(sw)) {
                     blockyWorld = sw;
-                    LOGGER.info("Captured Blocky Planet world reference: {}", sw.getRegistryKey().getValue());
+                    LOGGER.info("Captured Blocky Planet custom dimension: {}", sw.getRegistryKey().getValue());
                     break;
+                }
+            }
+            if (blockyWorld == null) {
+                // Fall back to any world using our generator (e.g. overworld override)
+                for (ServerWorld sw : server.getWorlds()) {
+                    if (isBlockyPlanetDimension(sw)) {
+                        blockyWorld = sw;
+                        LOGGER.info("Captured override world: {}", sw.getRegistryKey().getValue());
+                        break;
+                    }
                 }
             }
         });
@@ -59,13 +70,31 @@ public class BlockyPlanetMod implements ModInitializer {
             BlockyPlanetConfig.getPlanetRadius() / 1000.0);
     }
 
+    /**
+     * Returns true if this world uses our spherical Blocky Planet chunk generator.
+     *
+     * Checks both the dedicated {@code blocky_planet:blocky_planet} dimension and
+     * the vanilla overworld, which we override in our datapack data to use our generator.
+     *
+     * This is used by mixins to decide if cubic-world block storage should be active.
+     */
     public static boolean isBlockyPlanetDimension(World world) {
+        if (world == null) return false;
+        Identifier id = world.getRegistryKey().getValue();
+        return id.equals(DIMENSION_ID) || id.equals(Identifier.ofVanilla("overworld"));
+    }
+
+    /**
+     * Returns true only for the dedicated Blocky Planet dimension (not overworld override).
+     * Used by server startup to find the custom dimension preferentially.
+     */
+    private static boolean isCustomDimension(World world) {
         return world != null && world.getRegistryKey().getValue().equals(DIMENSION_ID);
     }
 
     public static PlanetBlockStorage getOrCreateStorage(World world) {
         if (!isBlockyPlanetDimension(world)) {
-            throw new IllegalStateException("Not a Blocky Planet dimension: " + world.getRegistryKey().getValue());
+            throw new IllegalStateException("Not a Blocky Planet world: " + world.getRegistryKey().getValue());
         }
         return CUBE_STORAGE_MAP.computeIfAbsent(world, w -> {
             LOGGER.info("Creating PlanetBlockStorage for world {}", w.getRegistryKey().getValue());
