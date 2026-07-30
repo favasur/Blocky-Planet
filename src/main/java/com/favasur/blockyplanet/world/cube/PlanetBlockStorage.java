@@ -16,6 +16,12 @@ import java.util.Arrays;
  * position on the planet sphere.  This enables a future renderer to
  * tilt each block's mesh so that adjacent faces form a continuous
  * curved surface — matching the "curved blocks at each chunk" design.
+ *
+ * All public methods are synchronized because the {@link #cubes} map is
+ * accessed from multiple threads simultaneously:
+ * - Worker threads in fillFromNoise call setBlockState
+ * - The server thread calls removeAllForChunk on chunk unload
+ * {@link Long2ObjectOpenHashMap} is NOT thread-safe.
  */
 public class PlanetBlockStorage {
 
@@ -38,14 +44,14 @@ public class PlanetBlockStorage {
 
     // ─── Block state access ──────────────────────────────────────────────────
 
-    public BlockState getBlockState(int x, int y, int z) {
+    public synchronized BlockState getBlockState(int x, int y, int z) {
         int cx = x >> 4, cy = y >> 4, cz = z >> 4;
         BlockState[] blocks = cubes.get(key(cx, cy, cz));
         if (blocks == null) return Blocks.AIR.defaultBlockState();
         return blocks[blockIndex(x, y, z)];
     }
 
-    public void setBlockState(int x, int y, int z, BlockState state) {
+    public synchronized void setBlockState(int x, int y, int z, BlockState state) {
         int cx = x >> 4, cy = y >> 4, cz = z >> 4;
         long k = key(cx, cy, cz);
         BlockState[] blocks = cubes.get(k);
@@ -59,12 +65,7 @@ public class PlanetBlockStorage {
 
     // ─── Surface normal access (for curved-block rendering) ──────────────────
 
-    /**
-     * Set the surface normal for a specific block.
-     * The normal is the unit vector pointing radially away from the planet center
-     * at this block's gravity-aligned position.
-     */
-    public void setNormal(int x, int y, int z, Vector3d normal) {
+    public synchronized void setNormal(int x, int y, int z, Vector3d normal) {
         int cx = x >> 4, cy = y >> 4, cz = z >> 4;
         long k = key(cx, cy, cz);
         Vector3d[] ns = normals.get(k);
@@ -75,47 +76,60 @@ public class PlanetBlockStorage {
         ns[blockIndex(x, y, z)] = normal;
     }
 
-    /**
-     * Get the surface normal for a specific block.
-     * Returns null if no normal was stored (e.g. for air blocks or un-generated cubes).
-     */
-    public Vector3d getNormal(int x, int y, int z) {
+    public synchronized Vector3d getNormal(int x, int y, int z) {
         int cx = x >> 4, cy = y >> 4, cz = z >> 4;
         Vector3d[] ns = normals.get(key(cx, cy, cz));
         if (ns == null) return null;
         return ns[blockIndex(x, y, z)];
     }
 
-    /**
-     * Batch-set normals for an entire cube from its BlockAddress positions.
-     */
-    public void setCubeNormals(int cx, int cy, int cz, Vector3d[] normalsArray) {
+    public synchronized void setCubeNormals(int cx, int cy, int cz, Vector3d[] normalsArray) {
         if (normalsArray == null || normalsArray.length != 4096) return;
         normals.put(key(cx, cy, cz), normalsArray);
     }
 
     // ─── Cube management ─────────────────────────────────────────────────────
 
-    public boolean hasCube(int cx, int cy, int cz) {
+    public synchronized boolean hasCube(int cx, int cy, int cz) {
         return cubes.containsKey(key(cx, cy, cz));
     }
 
-    public boolean hasAnyInSection(int chunkX, int sectionY, int chunkZ) {
-        // Check the single cube at this Y level for this chunk's X,Z
+    public synchronized boolean hasAnyInSection(int chunkX, int sectionY, int chunkZ) {
         return cubes.containsKey(key(chunkX, sectionY, chunkZ));
     }
 
-    public void removeCube(int cx, int cy, int cz) {
+    public synchronized void removeCube(int cx, int cy, int cz) {
         long k = key(cx, cy, cz);
         cubes.remove(k);
         normals.remove(k);
     }
 
-    public int size() {
+    /**
+     * Remove ALL cubes that belong to the given chunk column (any Y level).
+     * Called when a chunk unloads, preventing unbounded memory growth.
+     */
+    public synchronized void removeAllForChunk(int chunkX, int chunkZ) {
+        var toRemove = new java.util.ArrayList<Long>();
+        for (var it = cubes.long2ObjectEntrySet().fastIterator(); it.hasNext(); ) {
+            var entry = it.next();
+            long k = entry.getLongKey();
+            int cx = (int) (k & 0x1FFFFFL);
+            if (cx != chunkX) continue;
+            int cz = (int) ((k >> 42) & 0x1FFFFFL);
+            if (cz != chunkZ) continue;
+            toRemove.add(k);
+        }
+        for (long k : toRemove) {
+            cubes.remove(k);
+            normals.remove(k);
+        }
+    }
+
+    public synchronized int size() {
         return cubes.size();
     }
 
-    public void clear() {
+    public synchronized void clear() {
         cubes.clear();
         normals.clear();
     }

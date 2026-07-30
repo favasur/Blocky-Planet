@@ -121,7 +121,11 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
         PlanetBlockStorage storage = null;
         Level world = BlockyPlanetMod.blockyWorld;
-        if (world != null) storage = BlockyPlanetMod.getOrCreateStorage(world);
+        if (world != null) {
+            storage = BlockyPlanetMod.getOrCreateStorage(world);
+            // Pre-clean: remove any old cubes for this chunk before regenerating
+            storage.removeAllForChunk(chunkX, chunkZ);
+        }
 
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int chunkBottomY = chunk.getMinBuildHeight();
