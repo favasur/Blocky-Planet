@@ -65,7 +65,7 @@ public class BlockyPlanetMod {
         );
 
         NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onServerStarted);
-        // No teleport handlers — spawn position is set directly on the overworld
+        NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onPlayerJoinLevel);
 
         BlockyPlanetModClient.init();
         NeoForge.EVENT_BUS.addListener(BlockyPlanetModClient::onScreenInit);
@@ -82,22 +82,12 @@ public class BlockyPlanetMod {
     }
 
     public static void onServerStarted(ServerStartedEvent event) {
-        // Capture the overworld and set spawn position
+        // Capture the overworld reference
         for (ServerLevel sl : event.getServer().getAllLevels()) {
             if (!isBlockyPlanetDimension(sl)) continue;
 
             blockyWorld = sl;
             LOGGER.info("Blocky Planet world: {}", sl.dimension().location());
-
-            // Set the world spawn position at the planet surface.
-            // setDefaultSpawnPos should accept any Y value because our chunk
-            // generator overrides getMinY/getGenDepth/getSeaLevel, making the
-            // height range effectively unbounded.
-            double pr = QuadSphere.planetRadius();
-            int surfaceY = (int) Math.round(pr) + 16;
-            BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
-            sl.setDefaultSpawnPos(spawnPos, 0);
-            LOGGER.info("Set world spawn to {}", spawnPos);
 
             // Capture Tellus overworld reference
             if (TELLUS_LOADED) {
@@ -111,6 +101,23 @@ public class BlockyPlanetMod {
             }
             break;
         }
+    }
+
+    /**
+     * Teleport players to the planet surface when they join.
+     * setDefaultSpawnPos is ignored for extreme Y values during login,
+     * so direct teleport is used instead.
+     */
+    public static void onPlayerJoinLevel(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event) {
+        if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return;
+        Level world = event.getLevel();
+        if (!isBlockyPlanetDimension(world)) return;
+
+        double pr = QuadSphere.planetRadius();
+        int surfaceY = (int) Math.round(pr) + 16;
+        player.teleportTo((ServerLevel) world, 0.5, surfaceY, 0.5,
+            java.util.Set.of(), 0.0f, 0.0f);
+        LOGGER.info("Teleported player to planet surface at Y={}", surfaceY);
     }
 
     public static boolean isBlockyPlanetDimension(Level world) {
