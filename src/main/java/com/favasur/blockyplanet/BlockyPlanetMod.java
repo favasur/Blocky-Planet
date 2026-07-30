@@ -98,11 +98,16 @@ public class BlockyPlanetMod implements ModInitializer {
         // Replaces setSpawnPos which fails at extreme Y values because
         // DimensionType.logicalHeight() = 384 rejects positions above it
         // even with height-limit mixins. Direct teleport bypasses this.
+        //
+        // IMPORTANT: server.execute() defers the teleport by one tick so it
+        // runs AFTER the full login handshake. Without this delay the client
+        // receives both the initial spawn and the teleport simultaneously,
+        // triggering "You logged in from another location" disconnect.
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register(
             (handler, sender, server) -> {
                 net.minecraft.server.network.ServerPlayerEntity player = handler.getPlayer();
                 if (!isBlockyPlanetDimension(player.getServerWorld())) return;
-                teleportToSurface(player);
+                server.execute(() -> teleportToSurface(player));
             });
 
         // ═══ Also handle respawn (JOIN only fires on initial connection) ═══
