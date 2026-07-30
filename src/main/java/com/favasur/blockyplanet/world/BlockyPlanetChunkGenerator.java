@@ -67,6 +67,12 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
      * filled as lava in bulk via {@link PlanetBlockStorage#fillVolume}.
      * 15 000 blocks covers the crust + nether ring even on Earth-sized planets.
      */
+    /**
+     * Absolute maximum Y-range to iterate for per-block generation.
+     * For Earth-sized planets the nether ring is ~12 000 blocks deep,
+     * so 15 000 provides margin.  Smaller planets use a dynamically
+     * computed depth based on the actual nether inner edge.
+     */
     private static final int MAX_ITER_DEPTH = 15_000;
 
     // ─── Feature placement noise ─────────────────────────────────────────
@@ -188,11 +194,15 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
                 double noiseVal = terrainNoise.GetNoise(wx * NOISE_SCALE, 0, wz * NOISE_SCALE);
                 int surfaceY = (int) Math.round(baseY + noiseVal * TERRAIN_AMPLITUDE);
 
-                // Limit iteration to surface-MAX_ITER_DEPTH..surface.
-                // Everything below the iteration range is lava (bulk-filled)
-                // or void (hollow core). This prevents 7B+ iterations/column
-                // for Earth-sized planets.
-                int iterStartY = Math.max(-yBound, surfaceY - MAX_ITER_DEPTH);
+                // Limit iteration to surface-actualDepth..surface.
+                // actualDepth is the depth to the inner edge of the nether ring
+                // (where lava starts) + a safety margin. For small planets this
+                // is just ~24 blocks; for Earth-sized it's ~12 000 blocks.
+                // Capped at MAX_ITER_DEPTH to prevent unbounded iteration.
+                double netherInnerDepth = BlockyPlanetConfig.getNetherInnerDepth(planetRadius);
+                int actualDepth = (int) (netherInnerDepth + 200.0);
+                int maxDepth = Math.min(MAX_ITER_DEPTH, Math.max(actualDepth, 64));
+                int iterStartY = Math.max(-yBound, surfaceY - maxDepth);
                 int iterEndY   = surfaceY;
 
                 // █ Query the biome from the chunk's already-set biome data █
