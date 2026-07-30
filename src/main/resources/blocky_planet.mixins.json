@@ -8,9 +8,6 @@
     "MixinLevel_CubicWorld",
     "MixinWorldBorder_CubicWorld"
   ],
-  "client": [
-    "ScreenInvoker"
-  ],
   "injectors": {
     "defaultRequire": 1
   }

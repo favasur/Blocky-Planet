@@ -13,6 +13,8 @@ base {
 loom {
     splitEnvironmentSourceSets()
 
+    accessWidenerPath = file("src/main/resources/blocky_planet.accesswidener")
+
     mods {
         "blocky_planet" {
             sourceSet sourceSets.main

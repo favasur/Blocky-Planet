@@ -1,0 +1,5 @@
+accessWidener v2 named
+
+# Expose Screen.addDrawableChild(Element)Element so the Create World screen hook
+# can add widgets without a mixin invoker (which fails through Sinytra Connector).
+accessible method net/minecraft/client/gui/screen/Screen addDrawableChild (Lnet/minecraft/client/gui/Element;)Lnet/minecraft/client/gui/Element;

@@ -2,22 +2,24 @@ package com.bowerbyte.blockyplanet;
 
 import com.bowerbyte.blockyplanet.config.BlockyPlanetConfig;
 import com.bowerbyte.blockyplanet.gui.PlanetSizeScreen;
-import com.bowerbyte.blockyplanet.mixin.ScreenInvoker;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.Element;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.world.CreateWorldScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.text.Text;
 
 /**
- * Client entry point. Adds a "Planet Size" button to the Create World screen
- * using ScreenEvents + the ScreenInvoker mixin (which exposes protected
- * addDrawableChild via Element return type).
+ * Client entry point. Adds a "Planet Size" button to the Create World screen.
+ *
+ * Uses an access widener rather than a mixin invoker to call Screen's
+ * protected {@code addDrawableChild} method, because mixin invokers
+ * fail through Sinytra Connector (method name resolution issue).
+ *
+ * @see <a href="https://fabricmc.net/wiki/tutorial:accesswideners">Fabric Access Wideners</a>
  */
 @Environment(EnvType.CLIENT)
 public class BlockyPlanetModClient implements ClientModInitializer {
@@ -27,13 +29,12 @@ public class BlockyPlanetModClient implements ClientModInitializer {
         BlockyPlanetMod.LOGGER.info("Blocky Planet client initialized — registering world creation hook.");
 
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-            if (screen instanceof CreateWorldScreen cws) {
+            if (screen instanceof CreateWorldScreen) {
                 addPlanetSizeButton(client, screen);
             }
         });
     }
 
-    @SuppressWarnings("unchecked")
     private void addPlanetSizeButton(MinecraftClient client, Screen screen) {
         int btnW = 130;
         int btnH = 20;
@@ -54,8 +55,8 @@ public class BlockyPlanetModClient implements ClientModInitializer {
             }
         ).dimensions(rightX, topY, btnW, btnH).build();
 
-        // Use the ScreenInvoker mixin to access Screen's protected addDrawableChild
-        Element added = ((ScreenInvoker) screen).invokeAddDrawableChild(btn);
+        // Access widener makes addDrawableChild accessible without mixin invoker
+        screen.addDrawableChild(btn);
     }
 
     private static String formatDiameter(int d) {
