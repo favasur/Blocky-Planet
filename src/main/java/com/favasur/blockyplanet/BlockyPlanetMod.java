@@ -55,17 +55,32 @@ public class BlockyPlanetMod {
     }
 
     public static void onServerStarted(ServerStartedEvent event) {
+        // Prefer our custom dimension, fall back to any world using our generator
+        for (ServerLevel sl : event.getServer().getAllLevels()) {
+            if (isCustomDimension(sl)) {
+                blockyWorld = sl;
+                LOGGER.info("Captured Blocky Planet custom dimension: {}", sl.dimension().location());
+                return;
+            }
+        }
+        // Fall back to overworld override
         for (ServerLevel sl : event.getServer().getAllLevels()) {
             if (isBlockyPlanetDimension(sl)) {
                 blockyWorld = sl;
-                LOGGER.info("Captured Blocky Planet world reference: {}", sl.dimension().location());
-                break;
+                LOGGER.info("Captured override world: {}", sl.dimension().location());
+                return;
             }
         }
     }
 
-    public static boolean isBlockyPlanetDimension(Level world) {
+    private static boolean isCustomDimension(Level world) {
         return world != null && world.dimension().location().equals(DIMENSION_ID);
+    }
+
+    public static boolean isBlockyPlanetDimension(Level world) {
+        if (world == null) return false;
+        ResourceLocation id = world.dimension().location();
+        return id.equals(DIMENSION_ID) || id.equals(ResourceLocation.parse("minecraft:overworld"));
     }
 
     public static PlanetBlockStorage getOrCreateStorage(Level world) {

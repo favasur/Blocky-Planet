@@ -1,6 +1,6 @@
 package com.favasur.blockyplanet.world;
 
-import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.Blocks;
 
 /**

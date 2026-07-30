@@ -2,7 +2,7 @@ package com.favasur.blockyplanet.world.cube;
 
 import com.favasur.blockyplanet.planet.Vector3d;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.Blocks;
 
 import java.util.Arrays;

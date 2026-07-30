@@ -6,7 +6,7 @@ import com.favasur.blockyplanet.planet.QuadSphere;
 import com.favasur.blockyplanet.planet.Vector3d;
 import com.favasur.blockyplanet.world.FastNoiseLite;
 import com.favasur.blockyplanet.world.NetherBiomeHelper;
-import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.Blocks;
 
 /**
