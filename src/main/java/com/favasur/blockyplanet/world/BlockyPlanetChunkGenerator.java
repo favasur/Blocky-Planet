@@ -9,7 +9,6 @@ import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.core.BlockPos;
-
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
@@ -35,8 +34,9 @@ import java.util.concurrent.CompletableFuture;
  * Chunk generator for the spherical Blocky Planet world (NeoForge).
  *
  * Layer structure: surface → subsurface → stone crust → nether ring → lava → core.
- * Surface blocks use the actual BiomeSource for vanilla/moded biome compatibility.
+ * Surface blocks use the actual BiomeSource for vanilla/modded biome compatibility.
  * Includes tree generation in populateEntities, ore veins in crust, lava below Nether.
+ * When Tellus mod is detected, surface blocks are read from the overworld via projection.
  */
 public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
@@ -103,8 +103,6 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         return n;
     }
 
-    // ─── Carvers & surface ───────────────────────────────────────────────
-
     @Override public void applyCarvers(WorldGenRegion r, long s, RandomState rs, BiomeManager bm, StructureManager sm, ChunkAccess c, GenerationStep.Carving cv) {}
     @Override public void buildSurface(WorldGenRegion r, StructureManager sm, RandomState rs, ChunkAccess c) {}
 
@@ -170,7 +168,6 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
     @Override
     public void spawnOriginalMobs(WorldGenRegion region) {
-        // Place trees on the planet surface
         var centerPos = region.getCenter();
         int chunkX = centerPos.x;
         int chunkZ = centerPos.z;
@@ -179,7 +176,6 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         random.setSeed(random.nextLong() ^ (chunkX * 341873128712L + chunkZ * 132897987541L));
 
         placeSurfaceFeatures(region, chunkX << 4, chunkZ << 4, random);
-        // Vanilla mob spawning happens through the world/server tick, not here.
     }
 
     private void placeSurfaceFeatures(WorldGenRegion region, int baseX, int baseZ, Random random) {
@@ -271,11 +267,18 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         return Blocks.STONE.defaultBlockState();
     }
 
-    // ─── Surface blocks (BiomeSource integrated) ─────────────────────────
+    // ─── Surface blocks (BiomeSource integrated + Tellus) ────────────────
 
     private BlockState getSurfaceBlock(Vector3d p, double ad, boolean fallback, Biome biome) {
         double pr = QuadSphere.planetRadius();
         double wr = pr * 0.95;
+
+        // ── When Tellus is loaded, read surface blocks from the overworld ──
+        if (BlockyPlanetMod.TELLUS_LOADED && BlockyPlanetMod.tellusOverworld != null) {
+            BlockState tellusBlock = getTellusSurfaceBlock(p);
+            if (tellusBlock != null) return tellusBlock;
+        }
+
         if (ad <= wr) {
             double gc = fallback ? 0.3 : biomeNoise.GetNoise(p.x() * 0.1, p.y() * 0.1, p.z() * 0.1);
             return gc > 0.4 ? Blocks.GRAVEL.defaultBlockState() : Blocks.SAND.defaultBlockState();
@@ -287,24 +290,82 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         return Blocks.GRASS_BLOCK.defaultBlockState();
     }
 
+    /**
+     * Read a surface block from the Tellus overworld via equirectangular projection.
+     * Projects the planet's spherical position to flat overworld coordinates,
+     * reads the Tellus-generated biome at that position, and returns the
+     * appropriate surface block for that biome.
+     */
+    private BlockState getTellusSurfaceBlock(Vector3d alignedPos) {
+        try {
+            Level overworld = BlockyPlanetMod.tellusOverworld;
+            if (overworld == null) return null;
+
+            // Surface normal direction from planet center (unit vector)
+            double dist = alignedPos.length();
+            if (dist < 1) return null;
+            double nx = alignedPos.x() / dist;
+            double ny = alignedPos.y() / dist;
+            double nz = alignedPos.z() / dist;
+
+            // Spherical coordinates
+            double lat = Math.asin(ny);               // -π/2 to π/2
+            double lon = Math.atan2(nz, nx);           // -π to π
+
+            // Equirectangular projection to overworld flat coordinates
+            double scale = QuadSphere.planetRadius();
+            int ox = (int) Math.round(lon * scale);
+            int oz = (int) Math.round(lat * scale);
+
+            // Sample the Tellus overworld biome at the projected position (Y=0)
+            Biome tellusBiome = overworld.getBiome(new BlockPos(ox, 0, oz)).value();
+            if (tellusBiome == null) return null;
+
+            // Check if underwater in the Tellus overworld
+            int overworldSurfaceY = overworld.getHeight(Heightmap.Types.WORLD_SURFACE, ox, oz);
+            if (overworldSurfaceY <= overworld.getSeaLevel()) {
+                String tPath = getBiomePath(tellusBiome);
+                if (tPath.contains("deep") || tPath.contains("ocean")) {
+                    return Blocks.GRAVEL.defaultBlockState();
+                }
+                return Blocks.SAND.defaultBlockState();
+            }
+
+            return getBiomeSurfaceBlock(tellusBiome);
+        } catch (Exception e) {
+            return null; // Silently fall back
+        }
+    }
+
     private BlockState getBiomeSurfaceBlock(Biome biome) {
-        String path = "";
-        try { path = biome.toString().toLowerCase(); } catch (Exception ignored) {}
-        if (path.contains("snow") || path.contains("frozen") || path.contains("ice")) return Blocks.SNOW_BLOCK.defaultBlockState();
-        if (path.contains("taiga")) return Blocks.GRASS_BLOCK.defaultBlockState();
+        String path = getBiomePath(biome);
+        if (path.contains("snow") || path.contains("frozen") || path.contains("ice"))
+            return Blocks.SNOW_BLOCK.defaultBlockState();
         if (path.contains("desert") || path.contains("badlands") || path.contains("savanna"))
             return path.contains("badlands") ? Blocks.RED_SAND.defaultBlockState() : Blocks.SAND.defaultBlockState();
-        if (path.contains("beach") || path.contains("shore") || path.contains("river")) return Blocks.SAND.defaultBlockState();
-        if (path.contains("swamp") || path.contains("mushroom")) return path.contains("mushroom") ? Blocks.MYCELIUM.defaultBlockState() : Blocks.GRASS_BLOCK.defaultBlockState();
+        if (path.contains("beach") || path.contains("shore") || path.contains("river"))
+            return Blocks.SAND.defaultBlockState();
+        if (path.contains("swamp") || path.contains("mushroom"))
+            return path.contains("mushroom") ? Blocks.MYCELIUM.defaultBlockState() : Blocks.GRASS_BLOCK.defaultBlockState();
         return Blocks.GRASS_BLOCK.defaultBlockState();
+    }
+
+    /**
+     * Extract the biome identifier path for pattern matching.
+     * Uses toString() which returns the registry path on Mojmap (NeoForge).
+     */
+    private String getBiomePath(Biome biome) {
+        try {
+            return biome.toString().toLowerCase();
+        } catch (Exception ignored) {}
+        return "";
     }
 
     private BlockState getSubsurfaceBlock(Vector3d p, double ad, Biome biome) {
         double pr = QuadSphere.planetRadius();
         double sr = pr * 0.97;
         if (biome != null) {
-            String path = "";
-            try { path = biome.toString().toLowerCase(); } catch (Exception ignored) {}
+            String path = getBiomePath(biome);
             if (path.contains("desert")) return Blocks.SANDSTONE.defaultBlockState();
             if (path.contains("badlands")) return Blocks.RED_SANDSTONE.defaultBlockState();
         }

@@ -44,6 +44,12 @@ public class BlockyPlanetMod {
     /** Volatile so worker threads see the update immediately. */
     public static volatile Level blockyWorld;
 
+    /**
+     * Reference to the Tellus overworld (used for reading surface blocks).
+     * Set during server start when Tellus is loaded.
+     */
+    public static volatile Level tellusOverworld;
+
     public static final Set<WorldBorder> BLOCKY_BORDERS = ConcurrentHashMap.newKeySet();
 
     private static final Map<Level, PlanetBlockStorage> CUBE_STORAGE_MAP = new WeakHashMap<>();
@@ -63,7 +69,9 @@ public class BlockyPlanetMod {
         NeoForge.EVENT_BUS.addListener(BlockyPlanetModClient::onScreenInit);
 
         if (TELLUS_LOADED) {
-            LOGGER.info("Tellus detected — keeping Blocky Planet as separate dimension.");
+            LOGGER.info("Tellus detected — planet surface reads Tellus terrain from overworld via projection.");
+        } else {
+            LOGGER.info("No Tellus — overworld uses Blocky Planet generator.");
         }
 
         LOGGER.info("Blocky Planet initialized! Default planet radius: {} blocks ({} km)",
@@ -72,6 +80,17 @@ public class BlockyPlanetMod {
     }
 
     public static void onServerStarted(ServerStartedEvent event) {
+        // Capture Tellus overworld reference (used for surface block reading)
+        if (TELLUS_LOADED) {
+            for (ServerLevel sl : event.getServer().getAllLevels()) {
+                if (sl.dimension().location().equals(ResourceLocation.parse("minecraft:overworld"))) {
+                    tellusOverworld = sl;
+                    LOGGER.info("Captured Tellus overworld reference");
+                    break;
+                }
+            }
+        }
+
         // Prefer our custom dimension, fall back to any world using our generator
         for (ServerLevel sl : event.getServer().getAllLevels()) {
             if (isCustomDimension(sl)) {
