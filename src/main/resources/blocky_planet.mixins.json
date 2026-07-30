@@ -13,7 +13,6 @@
   ],
   "client": [
     "client.WorldRendererMixin",
-    "client.ChunkDebugRendererMixin",
     "client.LevelLoadingScreenMixin"
   ],
   "injectors": {
