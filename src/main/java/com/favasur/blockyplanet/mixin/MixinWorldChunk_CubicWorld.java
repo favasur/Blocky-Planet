@@ -26,15 +26,14 @@ import java.util.WeakHashMap;
  * Mixin into {@link Chunk} to extend the vanilla section array so the
  * renderer can see blocks at the planet surface Y level.
  *
- * PROBLEM:
- * The dimension type has min_y=0, height=16 → 1 section (Y=0..15).
- * Planet surface at Y=planetRadius (e.g. Y=7,000 for 14 km) is invisible.
+ * Uses a SPARSE virtual array: only creates sections within
+ * VERTICAL_RANGE of the planet surface Y. Sections outside that
+ * window are null (renderer skips nulls). This prevents massive
+ * arrays for Earth-sized planets while keeping surface blocks visible.
  *
- * FIX:
- * Override getSectionArray() to return a virtual array sized up to the
- * planet surface section index (capped at 8192). Populate from
- * PlanetBlockStorage. Cache in a static WeakHashMap keyed by Chunk
- * so other mixins (MixinWorldChunk_UnloadCleanup) can invalidate.
+ * For planets where the surface is beyond VERTICAL_RANGE from
+ * the vanilla array (radius > 256 blocks), the virtual array
+ * shifts the window to cover the surface.
  */
 @Mixin(Chunk.class)
 public class MixinWorldChunk_CubicWorld {
@@ -48,14 +47,23 @@ public class MixinWorldChunk_CubicWorld {
     @Unique
     private final Int2ObjectOpenHashMap<ChunkSection> blockyPlanet_sectionCache = new Int2ObjectOpenHashMap<>();
 
+    /**
+     * Number of sections above and below the planet surface to include
+     * in the virtual array. 512 sections = 8192 blocks vertically.
+     * Enough to cover crust + nether ring + lava on any planet size.
+     */
+    @Unique
+    private static final int VERTICAL_RANGE = 512;
+
     /** Invalidate the virtual array cache for a specific chunk. */
     public static void invalidate(Chunk chunk) {
         blockyPlanet_virtualCache.remove(chunk);
     }
 
     /**
-     * Override getSectionArray() to return a virtual section array that
-     * includes sections up to the planet surface Y level.
+     * Override getSectionArray() to return a virtual array with sections
+     * near the planet surface Y level. Sections far from the surface are
+     * null (renderer skips nulls).
      */
     @Inject(
         method = "getSectionArray()[Lnet/minecraft/world/chunk/ChunkSection;",
@@ -77,25 +85,47 @@ public class MixinWorldChunk_CubicWorld {
         }
 
         ChunkSection[] original = cir.getReturnValue();
-        double r = QuadSphere.planetRadius();
-        int surfaceIdx = (int) Math.ceil(r / 16.0);
+        double planetRadius = QuadSphere.planetRadius();
+        int surfaceSection = (int) Math.floor(planetRadius / 16.0);
 
-        // Cap at 8192 sections (~131 km radius) to prevent excessive memory
-        int maxIdx = Math.min(surfaceIdx, 8191);
-        if (maxIdx < original.length) return; // Already covered
+        // Define vertical window: VERTICAL_RANGE sections above and below surface
+        int windowMin = surfaceSection - VERTICAL_RANGE;
+        int windowMax = surfaceSection + VERTICAL_RANGE;
 
-        // Build virtual array
-        ChunkSection[] virtual = new ChunkSection[maxIdx + 1];
-        System.arraycopy(original, 0, virtual, 0, original.length);
+        // Clamp to non-negative
+        if (windowMin < 0) windowMin = 0;
 
-        // Fill higher sections from PlanetBlockStorage or empty
+        // If the window is within the original array, no modification needed
+        if (windowMax < original.length) return;
+
+        // Build virtual array sized to cover the window
+        int arraySize = windowMax + 1;
+        // Hard cap at 1M sections (16M blocks) to prevent catastrophic memory
+        if (arraySize > 1_000_000) {
+            BlockyPlanetMod.LOGGER.warn(
+                "Planet too large for virtual section array ({} sections). Surface won't render.",
+                arraySize);
+            return;
+        }
+
+        ChunkSection[] virtual = new ChunkSection[arraySize];
+
+        // Copy vanilla sections for the overlap range
+        for (int i = 0; i < original.length && i < arraySize; i++) {
+            virtual[i] = original[i];
+        }
+
+        // Only populate sections within the vertical window
         PlanetBlockStorage storage = BlockyPlanetMod.getOrCreateStorage(world);
         int chunkX = self.getPos().x;
         int chunkZ = self.getPos().z;
         Registry<Biome> biomeReg = world.getRegistryManager().get(RegistryKeys.BIOME);
 
-        for (int i = original.length; i <= maxIdx; i++) {
-            int cubeY = i; // section index == cubeY (both Y÷16)
+        int fillStart = Math.max(original.length, windowMin);
+        int fillEnd = windowMax;
+
+        for (int i = fillStart; i <= fillEnd; i++) {
+            int cubeY = i;
             int baseY = i << 4;
 
             if (storage.hasAnyInSection(chunkX, cubeY, chunkZ)) {
@@ -113,13 +143,9 @@ public class MixinWorldChunk_CubicWorld {
                         }
                     }
                 }
-                if (hasBlocks) {
-                    virtual[i] = sec;
-                    continue;
-                }
+                if (hasBlocks) virtual[i] = sec;
             }
-            // Fill with empty section to avoid null sections
-            virtual[i] = new ChunkSection(biomeReg);
+            // No section → null (renderer skips null entries)
         }
 
         blockyPlanet_virtualCache.put(chunk, virtual);
@@ -140,21 +166,19 @@ public class MixinWorldChunk_CubicWorld {
         World world = self.getWorld();
         if (!BlockyPlanetMod.isBlockyPlanetDimension(world)) return;
 
-        // Check per-section cache
         ChunkSection cached = blockyPlanet_sectionCache.get(yIndex);
         if (cached != null) {
             cir.setReturnValue(cached);
             return;
         }
 
-        // Check PlanetBlockStorage
         PlanetBlockStorage storage = BlockyPlanetMod.getOrCreateStorage(world);
         int chunkX = self.getPos().x;
         int chunkZ = self.getPos().z;
         int baseY = yIndex << 4;
 
         if (!storage.hasAnyInSection(chunkX, yIndex, chunkZ)) {
-            return; // Let vanilla handle it
+            return;
         }
 
         Registry<Biome> biomeRegistry = world.getRegistryManager().get(RegistryKeys.BIOME);

@@ -23,7 +23,11 @@
   },
   "accessWidener": "blocky_planet.accesswidener",
   "mixins": [
-    "blocky_planet.mixins.json"
+    "blocky_planet.mixins.json",
+    {
+      "config": "blocky_planet.client.mixins.json",
+      "environment": "client"
+    }
   ],
   "depends": {
     "fabricloader": ">=${loader_version}",
