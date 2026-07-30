@@ -8,6 +8,7 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.Element;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.world.CreateWorldScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -16,7 +17,7 @@ import net.minecraft.text.Text;
 /**
  * Client entry point. Adds a "Planet Size" button to the Create World screen
  * using ScreenEvents + the ScreenInvoker mixin (which exposes protected
- * addDrawableChild as public invokeAddDrawableChild).
+ * addDrawableChild via Element return type).
  */
 @Environment(EnvType.CLIENT)
 public class BlockyPlanetModClient implements ClientModInitializer {
@@ -32,6 +33,7 @@ public class BlockyPlanetModClient implements ClientModInitializer {
         });
     }
 
+    @SuppressWarnings("unchecked")
     private void addPlanetSizeButton(MinecraftClient client, Screen screen) {
         int btnW = 130;
         int btnH = 20;
@@ -53,7 +55,7 @@ public class BlockyPlanetModClient implements ClientModInitializer {
         ).dimensions(rightX, topY, btnW, btnH).build();
 
         // Use the ScreenInvoker mixin to access Screen's protected addDrawableChild
-        ((ScreenInvoker) (Object) screen).invokeAddDrawableChild(btn);
+        Element added = ((ScreenInvoker) screen).invokeAddDrawableChild(btn);
     }
 
     private static String formatDiameter(int d) {

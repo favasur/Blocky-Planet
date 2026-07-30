@@ -4,7 +4,9 @@
   "package": "com.bowerbyte.blockyplanet.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "PlayerEntityMixin"
+    "PlayerEntityMixin",
+    "MixinLevel_CubicWorld",
+    "MixinWorldBorder_CubicWorld"
   ],
   "client": [
     "ScreenInvoker"

@@ -1,0 +1,10 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\.md]
+@="Obsidian.Markdown"
+
+[HKEY_CLASSES_ROOT\Obsidian.Markdown]
+@="Markdown Document"
+
+[HKEY_CLASSES_ROOT\Obsidian.Markdown\shell\open\command]
+@="cmd.exe /c start \"\" \"obsidian://open?path=%1\""
