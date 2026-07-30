@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.border.WorldBorder;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
@@ -28,6 +29,17 @@ public class BlockyPlanetMod {
 
     public static final ResourceLocation DIMENSION_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "blocky_planet");
     public static final ResourceLocation CHUNK_GENERATOR_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "blocky_planet_generator");
+
+    /** Whether Tellus (real Earth terrain) is loaded alongside us. */
+    public static final boolean TELLUS_LOADED;
+
+    static {
+        boolean t = false;
+        try {
+            t = ModList.get().isLoaded("tellus");
+        } catch (Exception ignored) {}
+        TELLUS_LOADED = t;
+    }
 
     /** Volatile so worker threads see the update immediately. */
     public static volatile Level blockyWorld;
@@ -49,6 +61,10 @@ public class BlockyPlanetMod {
 
         BlockyPlanetModClient.init();
         NeoForge.EVENT_BUS.addListener(BlockyPlanetModClient::onScreenInit);
+
+        if (TELLUS_LOADED) {
+            LOGGER.info("Tellus detected — keeping Blocky Planet as separate dimension.");
+        }
 
         LOGGER.info("Blocky Planet initialized! Default planet radius: {} blocks ({} km)",
                 BlockyPlanetConfig.getPlanetRadius(),
@@ -81,7 +97,10 @@ public class BlockyPlanetMod {
     public static boolean isBlockyPlanetDimension(Level world) {
         if (world == null) return false;
         ResourceLocation id = world.dimension().location();
-        return id.equals(DIMENSION_ID) || id.equals(ResourceLocation.parse("minecraft:overworld"));
+        if (id.equals(DIMENSION_ID)) return true;
+        // Only check overworld if Tellus is NOT loaded
+        if (!TELLUS_LOADED && id.equals(ResourceLocation.parse("minecraft:overworld"))) return true;
+        return false;
     }
 
     /** Synchronized because WeakHashMap is not thread-safe. */
