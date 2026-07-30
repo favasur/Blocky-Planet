@@ -11,19 +11,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * Mixin into {@link HeightLimitView} to remove height limits for the
- * Blocky Planet dimension. This interface defines the default methods
- * {@code isOutOfHeightLimit(BlockPos)} and {@code isOutOfHeightLimit(int)}
- * which are inherited by {@link World} (among others).
+ * Blocky Planet dimension.
  *
- * Without this mixin, the game considers any Y coordinate outside
- * -64…320 as "out of height limit", preventing block interactions
- * (breaking/placing) on the planet surface where Y ≈ planetRadius.
+ * IMPORTANT: This mixin is an {@code interface} with {@code default} methods
+ * because Mixin needs {@code SubType.Interface} when the target is itself an
+ * interface. If declared as a class, Mixin's {@code SubType.Standard} rejects
+ * it with "target type mismatch: ... is an interface".
  *
- * The mixin checks {@link BlockyPlanetMod#isBlockyPlanetDimension}
- * before cancelling, so other dimensions retain their normal limits.
+ * The {@code isOutOfHeightLimit} methods are default methods on
+ * {@link HeightLimitView} inherited by {@link World} — they could not be
+ * found when targeting {@code World.class} because Mixin does not resolve
+ * inherited interface default methods through the class hierarchy.
  */
 @Mixin(HeightLimitView.class)
-public abstract class MixinHeightLimitView {
+public interface MixinHeightLimitView {
 
     /**
      * {@code isOutOfHeightLimit(BlockPos)} — always false for Blocky Planet.
@@ -33,7 +34,7 @@ public abstract class MixinHeightLimitView {
         at = @At("HEAD"),
         cancellable = true
     )
-    private void blockyPlanet_isOutOfHeightLimit(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
+    default void blockyPlanet_isOutOfHeightLimit(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
         if ((Object) this instanceof World world && BlockyPlanetMod.isBlockyPlanetDimension(world)) {
             cir.setReturnValue(false);
         }
@@ -47,7 +48,7 @@ public abstract class MixinHeightLimitView {
         at = @At("HEAD"),
         cancellable = true
     )
-    private void blockyPlanet_isOutOfHeightLimit(int y, CallbackInfoReturnable<Boolean> cir) {
+    default void blockyPlanet_isOutOfHeightLimit(int y, CallbackInfoReturnable<Boolean> cir) {
         if ((Object) this instanceof World world && BlockyPlanetMod.isBlockyPlanetDimension(world)) {
             cir.setReturnValue(false);
         }
