@@ -157,6 +157,8 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         World world = BlockyPlanetMod.blockyWorld;
         if (world != null) {
             storage = BlockyPlanetMod.getOrCreateStorage(world);
+            // Pre-clean: remove any old cubes for this chunk before regenerating
+            storage.removeAllForChunk(chunkX, chunkZ);
         }
 
         BlockPos.Mutable cursor = new BlockPos.Mutable();
