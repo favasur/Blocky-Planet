@@ -37,9 +37,10 @@ public class MixinWorldChunk_CubicWorld {
      * PlanetBlockStorage for section indices outside the vanilla height.
      */
     @Inject(
-        method = "getSection",
+        method = "getSection(I)Lnet/minecraft/world/chunk/ChunkSection;",
         at = @At("HEAD"),
-        cancellable = true
+        cancellable = true,
+        require = 0
     )
     private void blockyPlanet_getSection(int yIndex, CallbackInfoReturnable<ChunkSection> cir) {
         WorldChunk self = (WorldChunk) (Object) this;
