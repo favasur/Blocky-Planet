@@ -52,21 +52,8 @@ public abstract class LevelLoadingScreenMixin {
         Long2ObjectOpenHashMap<ChunkStatus> statuses =
             ((StoringChunkProgressListenerAccessor) progressListener).getStatuses();
 
-        // Draw border (same as vanilla)
-        guiGraphics.fill(centerX - visualFull / 2 - 1, centerY - visualFull / 2 - 1,
-                         centerX + visualFull / 2 + 1, centerY - visualFull / 2,
-                         0xFF2222F0);
-        guiGraphics.fill(centerX - visualFull / 2 - 1, centerY + visualFull / 2,
-                         centerX + visualFull / 2 + 1, centerY + visualFull / 2 + 1,
-                         0xFF2222F0);
-        guiGraphics.fill(centerX - visualFull / 2 - 1, centerY - visualFull / 2,
-                         centerX - visualFull / 2, centerY + visualFull / 2,
-                         0xFF2222F0);
-        guiGraphics.fill(centerX + visualFull / 2, centerY - visualFull / 2,
-                         centerX + visualFull / 2 + 1, centerY + visualFull / 2,
-                         0xFF2222F0);
-
         // Draw chunk progress cells — only within the circular radius
+        // (No border — the circle of colored cells is self-explanatory)
         for (int i = 0; i < fullDiameter; i++) {
             for (int j = 0; j < fullDiameter; j++) {
                 float dx = i - halfFull + 0.5f;
