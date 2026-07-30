@@ -162,8 +162,6 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         }
 
         BlockPos.Mutable cursor = new BlockPos.Mutable();
-        int chunkBottomY = chunk.getBottomY();
-        int chunkTopY = chunk.getTopY() - 1;
 
         for (int dx = 0; dx < 16; dx++) {
             for (int dz = 0; dz < 16; dz++) {
@@ -176,9 +174,12 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
                 int yBound = (int) Math.floor(Math.sqrt(maxYSq));
 
-                int startY = Math.max(-yBound, chunkBottomY);
-                int endY   = Math.min(yBound, chunkTopY);
-                if (startY > endY) continue;
+                // Use the full planet-geometry Y range, NOT clamped to
+                // chunkBottomY..chunkTopY (0..15).  Blocks are stored in
+                // PlanetBlockStorage and the virtual section array makes
+                // them visible regardless of the dimension's height setting.
+                int startY = -yBound;
+                int endY   = yBound;
 
                 // █ Query the biome from the chunk's already-set biome data █
                 // This uses whatever biomes were set during createBiomes() —

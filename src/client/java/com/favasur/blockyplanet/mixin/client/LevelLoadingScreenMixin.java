@@ -42,21 +42,18 @@ public abstract class LevelLoadingScreenMixin {
 
         ci.cancel();
 
+        int cellSize = pixelSize + centerSizeDiv; // Vanilla: pixelSize=2, centerSizeDiv=0 → cellSize=2
         int stepSize = progressProvider.getCenterSize();
         int fullSize = progressProvider.getSize();
-        int gridPixelSize = pixelSize * 2 + 1;
-        int visualFullSize = fullSize * stepSize;
+        int visualFull = fullSize * stepSize;
 
-        int xStart = centerX - visualFullSize / 2;
-        int yStart = centerY - visualFullSize / 2;
+        int xStart = centerX - visualFull / 2;
+        int yStart = centerY - visualFull / 2;
         float radiusSq = (fullSize / 2.0f) * (fullSize / 2.0f);
         float halfFull = fullSize / 2.0f;
 
-        // Draw chunk progress cells — only within the circular radius
-        // (No border — the circle of colored cells is self-explanatory)
         for (int i = 0; i < fullSize; i++) {
             for (int j = 0; j < fullSize; j++) {
-                // Check if this cell is within the circle
                 float dx = i - halfFull + 0.5f;
                 float dz = j - halfFull + 0.5f;
                 if (dx * dx + dz * dz > radiusSq) continue;
@@ -64,10 +61,8 @@ public abstract class LevelLoadingScreenMixin {
                 ChunkStatus status = progressProvider.getChunkStatus(i, j);
                 int cellX = xStart + i * stepSize;
                 int cellY = yStart + j * stepSize;
-                int color = getStatusColor(status) | 0xFF000000;
-                context.fill(cellX, cellY,
-                             cellX + gridPixelSize, cellY + gridPixelSize,
-                             color);
+                context.fill(cellX, cellY, cellX + cellSize, cellY + cellSize,
+                             getStatusColor(status));
             }
         }
     }
