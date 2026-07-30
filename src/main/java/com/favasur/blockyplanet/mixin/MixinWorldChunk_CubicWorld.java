@@ -3,6 +3,7 @@ package com.favasur.blockyplanet.mixin;
 import com.favasur.blockyplanet.BlockyPlanetMod;
 import com.favasur.blockyplanet.planet.QuadSphere;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
+import com.favasur.blockyplanet.world.cube.SectionCache;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minecraft.block.BlockState;
 import net.minecraft.registry.Registry;
@@ -17,10 +18,6 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-
-import java.util.Collections;
-import java.util.Map;
-import java.util.WeakHashMap;
 
 /**
  * Mixin into {@link Chunk} to extend the vanilla section array so the
@@ -38,11 +35,6 @@ import java.util.WeakHashMap;
 @Mixin(Chunk.class)
 public class MixinWorldChunk_CubicWorld {
 
-    /** Global cache: virtual section arrays keyed by Chunk identity. */
-    @Unique
-    private static final Map<Chunk, ChunkSection[]> blockyPlanet_virtualCache =
-        Collections.synchronizedMap(new WeakHashMap<>());
-
     /** Per-section cache for the getSection(int) fallback. */
     @Unique
     private final Int2ObjectOpenHashMap<ChunkSection> blockyPlanet_sectionCache = new Int2ObjectOpenHashMap<>();
@@ -54,12 +46,6 @@ public class MixinWorldChunk_CubicWorld {
      */
     @Unique
     private static final int VERTICAL_RANGE = 512;
-
-    /** Invalidate the virtual array cache for a specific chunk. */
-    @Unique
-    public static void invalidate(Chunk chunk) {
-        blockyPlanet_virtualCache.remove(chunk);
-    }
 
     /**
      * Override getSectionArray() to return a virtual array with sections
@@ -78,8 +64,8 @@ public class MixinWorldChunk_CubicWorld {
 
         Chunk chunk = (Chunk) (Object) this;
 
-        // Check global cache
-        ChunkSection[] cached = blockyPlanet_virtualCache.get(chunk);
+        // Check global cache (standalone utility class, not on mixin)
+        ChunkSection[] cached = SectionCache.get(chunk);
         if (cached != null) {
             cir.setReturnValue(cached);
             return;
@@ -149,7 +135,7 @@ public class MixinWorldChunk_CubicWorld {
             // No section → null (renderer skips null entries)
         }
 
-        blockyPlanet_virtualCache.put(chunk, virtual);
+        SectionCache.put(chunk, virtual);
         cir.setReturnValue(virtual);
     }
 

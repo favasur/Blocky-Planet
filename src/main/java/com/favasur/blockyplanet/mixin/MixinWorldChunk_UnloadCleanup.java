@@ -2,6 +2,7 @@ package com.favasur.blockyplanet.mixin;
 
 import com.favasur.blockyplanet.BlockyPlanetMod;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
+import com.favasur.blockyplanet.world.cube.SectionCache;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 import org.spongepowered.asm.mixin.Mixin;
@@ -29,7 +30,7 @@ public class MixinWorldChunk_UnloadCleanup {
         if (loaded) {
             // Chunk loading: invalidate virtual section array cache
             // so the renderer picks up any updated blocks
-            MixinWorldChunk_CubicWorld.invalidate(self);
+            SectionCache.invalidate(self);
         } else {
             // Chunk unloading: clean up PlanetBlockStorage cubes
             try {
