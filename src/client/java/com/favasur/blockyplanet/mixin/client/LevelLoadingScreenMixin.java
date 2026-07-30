@@ -52,21 +52,8 @@ public abstract class LevelLoadingScreenMixin {
         float radiusSq = (fullSize / 2.0f) * (fullSize / 2.0f);
         float halfFull = fullSize / 2.0f;
 
-        // Draw background border rectangle (same as vanilla)
-        context.fill(centerX - visualFullSize / 2 - 1, centerY - visualFullSize / 2 - 1,
-                     centerX + visualFullSize / 2 + 1, centerY - visualFullSize / 2,
-                     0xFF2222F0);
-        context.fill(centerX - visualFullSize / 2 - 1, centerY + visualFullSize / 2,
-                     centerX + visualFullSize / 2 + 1, centerY + visualFullSize / 2 + 1,
-                     0xFF2222F0);
-        context.fill(centerX - visualFullSize / 2 - 1, centerY - visualFullSize / 2,
-                     centerX - visualFullSize / 2, centerY + visualFullSize / 2,
-                     0xFF2222F0);
-        context.fill(centerX + visualFullSize / 2, centerY - visualFullSize / 2,
-                     centerX + visualFullSize / 2 + 1, centerY + visualFullSize / 2,
-                     0xFF2222F0);
-
         // Draw chunk progress cells — only within the circular radius
+        // (No border — the circle of colored cells is self-explanatory)
         for (int i = 0; i < fullSize; i++) {
             for (int j = 0; j < fullSize; j++) {
                 // Check if this cell is within the circle
