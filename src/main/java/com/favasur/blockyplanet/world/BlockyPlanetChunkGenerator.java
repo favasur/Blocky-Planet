@@ -56,6 +56,8 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
      * Maximum Y-range to iterate for per-block generation in each column.
      * 15 000 blocks covers the crust + nether ring even on Earth-sized planets.
      */
+    /** Absolute max Y-range for per-block iteration. Earth-sized planets 
+     * need ~12 000 blocks for the nether ring; 15 000 provides margin. */
     private static final int MAX_ITER_DEPTH = 15_000;
 
     private final FastNoiseLite terrainNoise;
@@ -152,8 +154,13 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
                 double noiseVal = terrainNoise.GetNoise(wx * NOISE_SCALE, 0, wz * NOISE_SCALE);
                 int surfaceY = (int) Math.round(baseY + noiseVal * TERRAIN_AMPLITUDE);
 
-                // Limit iteration to surface-MAX_ITER_DEPTH..surface.
-                int iterStartY = Math.max(-yBound, surfaceY - MAX_ITER_DEPTH);
+                // Limit iteration to surface-actualDepth..surface.
+                // actualDepth = nether inner edge + margin. For 14km planets
+                // this is ~24 blocks; for Earth-sized ~12 000 blocks.
+                double netherInnerDepth = BlockyPlanetConfig.getNetherInnerDepth(planetRadius);
+                int actualDepth = (int) (netherInnerDepth + 200.0);
+                int maxDepth = Math.min(MAX_ITER_DEPTH, Math.max(actualDepth, 64));
+                int iterStartY = Math.max(-yBound, surfaceY - maxDepth);
                 int iterEndY   = surfaceY;
 
                 // Query biome from the chunk's noise-cell biome data
