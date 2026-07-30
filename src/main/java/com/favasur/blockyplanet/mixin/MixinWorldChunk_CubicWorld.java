@@ -3,6 +3,7 @@ package com.favasur.blockyplanet.mixin;
 import com.favasur.blockyplanet.BlockyPlanetMod;
 import com.favasur.blockyplanet.planet.QuadSphere;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
+import com.favasur.blockyplanet.world.cube.SectionCache;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
@@ -18,10 +19,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.Collections;
-import java.util.Map;
-import java.util.WeakHashMap;
-
 /**
  * Mixin into {@link ChunkAccess} to extend the vanilla section array so the
  * renderer can see blocks at the planet surface Y level (NeoForge / Mojmap).
@@ -30,17 +27,7 @@ import java.util.WeakHashMap;
 public class MixinWorldChunk_CubicWorld {
 
     @Unique
-    private static final Map<ChunkAccess, LevelChunkSection[]> blockyPlanet_virtualCache =
-        Collections.synchronizedMap(new WeakHashMap<>());
-
-    @Unique
     private final Int2ObjectOpenHashMap<LevelChunkSection> blockyPlanet_sectionCache = new Int2ObjectOpenHashMap<>();
-
-    /** Invalidate the virtual array cache for a specific chunk. */
-    @Unique
-    public static void invalidate(ChunkAccess chunk) {
-        blockyPlanet_virtualCache.remove(chunk);
-    }
 
     /**
      * Override getSections() to return a virtual section array that
@@ -58,7 +45,7 @@ public class MixinWorldChunk_CubicWorld {
 
         ChunkAccess chunk = (ChunkAccess) (Object) this;
 
-        LevelChunkSection[] cached = blockyPlanet_virtualCache.get(chunk);
+        LevelChunkSection[] cached = SectionCache.get(chunk);
         if (cached != null) {
             cir.setReturnValue(cached);
             return;
@@ -105,7 +92,7 @@ public class MixinWorldChunk_CubicWorld {
             virtual[i] = new LevelChunkSection(biomeReg);
         }
 
-        blockyPlanet_virtualCache.put(chunk, virtual);
+        SectionCache.put(chunk, virtual);
         cir.setReturnValue(virtual);
     }
 
