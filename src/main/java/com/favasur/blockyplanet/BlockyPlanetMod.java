@@ -3,16 +3,13 @@ package com.favasur.blockyplanet;
 import com.favasur.blockyplanet.config.BlockyPlanetConfig;
 import com.favasur.blockyplanet.world.BlockyPlanetChunkGenerator;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
-import net.minecraft.core.Registry;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.border.WorldBorder;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.minecraft.registry.Registry;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.Identifier;
+import net.minecraft.world.World;
+import net.minecraft.world.border.WorldBorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,59 +18,57 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Mod(BlockyPlanetMod.MOD_ID)
-public class BlockyPlanetMod {
+public class BlockyPlanetMod implements ModInitializer {
     public static final String MOD_ID = "blocky_planet";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-    public static final ResourceLocation DIMENSION_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "blocky_planet");
-    public static final ResourceLocation CHUNK_GENERATOR_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "blocky_planet_generator");
+    public static final Identifier DIMENSION_ID = Identifier.of(MOD_ID, "blocky_planet");
+    public static final Identifier CHUNK_GENERATOR_ID = Identifier.of(MOD_ID, "blocky_planet_generator");
 
-    public static Level blockyWorld;
+    /** Accessed by the chunk generator during populateNoise. Set when the server starts. */
+    public static World blockyWorld;
 
+    /** Set of WorldBorder instances that belong to the Blocky Planet dimension. */
     public static final Set<WorldBorder> BLOCKY_BORDERS = ConcurrentHashMap.newKeySet();
 
-    private static final Map<Level, PlanetBlockStorage> CUBE_STORAGE_MAP = new WeakHashMap<>();
+    private static final Map<World, PlanetBlockStorage> CUBE_STORAGE_MAP = new WeakHashMap<>();
 
-    public BlockyPlanetMod(IEventBus modBus) {
+    @Override
+    public void onInitialize() {
         BlockyPlanetConfig.setPlanetDiameter(BlockyPlanetConfig.DEFAULT_DIAMETER);
 
         Registry.register(
-                BuiltInRegistries.CHUNK_GENERATOR,
-                CHUNK_GENERATOR_ID,
-                BlockyPlanetChunkGenerator.CODEC
+            net.minecraft.registry.Registries.CHUNK_GENERATOR,
+            CHUNK_GENERATOR_ID,
+            BlockyPlanetChunkGenerator.CODEC
         );
 
-        NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onServerStarted);
-
-        modBus.addListener(BlockyPlanetModClient::init);
-        NeoForge.EVENT_BUS.addListener(BlockyPlanetModClient::onScreenInit);
+        // Capture the Blocky Planet world reference when the server starts
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            for (ServerWorld sw : server.getWorlds()) {
+                if (isBlockyPlanetDimension(sw)) {
+                    blockyWorld = sw;
+                    LOGGER.info("Captured Blocky Planet world reference: {}", sw.getRegistryKey().getValue());
+                    break;
+                }
+            }
+        });
 
         LOGGER.info("Blocky Planet initialized! Default planet radius: {} blocks ({} km)",
-                BlockyPlanetConfig.getPlanetRadius(),
-                BlockyPlanetConfig.getPlanetRadius() / 1000.0);
+            BlockyPlanetConfig.getPlanetRadius(),
+            BlockyPlanetConfig.getPlanetRadius() / 1000.0);
     }
 
-    public static void onServerStarted(ServerStartedEvent event) {
-        for (ServerLevel sl : event.getServer().getAllLevels()) {
-            if (isBlockyPlanetDimension(sl)) {
-                blockyWorld = sl;
-                LOGGER.info("Captured Blocky Planet world reference: {}", sl.dimension().location());
-                break;
-            }
-        }
+    public static boolean isBlockyPlanetDimension(World world) {
+        return world != null && world.getRegistryKey().getValue().equals(DIMENSION_ID);
     }
 
-    public static boolean isBlockyPlanetDimension(Level world) {
-        return world != null && world.dimension().location().equals(DIMENSION_ID);
-    }
-
-    public static PlanetBlockStorage getOrCreateStorage(Level world) {
+    public static PlanetBlockStorage getOrCreateStorage(World world) {
         if (!isBlockyPlanetDimension(world)) {
-            throw new IllegalStateException("Not a Blocky Planet dimension: " + world.dimension().location());
+            throw new IllegalStateException("Not a Blocky Planet dimension: " + world.getRegistryKey().getValue());
         }
         return CUBE_STORAGE_MAP.computeIfAbsent(world, w -> {
-            LOGGER.info("Creating PlanetBlockStorage for world {}", w.dimension().location());
+            LOGGER.info("Creating PlanetBlockStorage for world {}", w.getRegistryKey().getValue());
             return new PlanetBlockStorage();
         });
     }

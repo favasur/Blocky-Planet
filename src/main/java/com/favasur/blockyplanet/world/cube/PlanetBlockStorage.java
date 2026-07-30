@@ -2,8 +2,8 @@ package com.favasur.blockyplanet.world.cube;
 
 import com.favasur.blockyplanet.planet.Vector3d;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.minecraft.world.level.block.BlockState;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 
 import java.util.Arrays;
 
@@ -41,7 +41,7 @@ public class PlanetBlockStorage {
     public BlockState getBlockState(int x, int y, int z) {
         int cx = x >> 4, cy = y >> 4, cz = z >> 4;
         BlockState[] blocks = cubes.get(key(cx, cy, cz));
-        if (blocks == null) return Blocks.AIR.defaultBlockState();
+        if (blocks == null) return Blocks.AIR.getDefaultState();
         return blocks[blockIndex(x, y, z)];
     }
 
@@ -51,7 +51,7 @@ public class PlanetBlockStorage {
         BlockState[] blocks = cubes.get(k);
         if (blocks == null) {
             blocks = new BlockState[4096];
-            Arrays.fill(blocks, Blocks.AIR.defaultBlockState());
+            Arrays.fill(blocks, Blocks.AIR.getDefaultState());
             cubes.put(k, blocks);
         }
         blocks[blockIndex(x, y, z)] = state;
@@ -100,6 +100,10 @@ public class PlanetBlockStorage {
         return cubes.containsKey(key(cx, cy, cz));
     }
 
+    /**
+     * Quick check if ANY cube exists in this chunk's XZ column at the given section Y.
+     * Used by the WorldChunk section mixin to avoid creating empty ChunkSections.
+     */
     public boolean hasAnyInSection(int chunkX, int sectionY, int chunkZ) {
         // Check the single cube at this Y level for this chunk's X,Z
         return cubes.containsKey(key(chunkX, sectionY, chunkZ));

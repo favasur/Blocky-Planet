@@ -20,7 +20,7 @@ import com.favasur.blockyplanet.config.BlockyPlanetConfig;
  * Shells are 16 blocks thick (radially).  A shell's side-resolution doubles
  * every shell, starting from 16 blocks per side at shell 0.
  *
- * Reference: https://www.favasur.com/posts/blocky-planet/
+ * Reference: https://www.bowerbyte.com/posts/blocky-planet/
  */
 public final class QuadSphere {
 

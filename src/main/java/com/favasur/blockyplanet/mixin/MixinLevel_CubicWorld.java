@@ -2,10 +2,10 @@ package com.favasur.blockyplanet.mixin;
 
 import com.favasur.blockyplanet.BlockyPlanetMod;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.block.BlockState;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
+import net.minecraft.world.border.WorldBorder;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -15,19 +15,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Mixin into {@link Level} to remove all world boundaries for the Blocky
+ * Mixin into {@link World} to remove all world boundaries for the Blocky
  * Planet dimension:
  *
  * - {@code getBlockState/setBlockState} route through the unbounded
  *   {@link PlanetBlockStorage} instead of vanilla height-bounded chunks.
- * - {@code isOutsideBuildHeight} always returns false — any Y is valid.
+ * - {@code isOutOfHeightLimit} always returns false — any Y is valid.
  * - The world border is bypassed by registering this World's border
  *   in a global set checked by {@link MixinWorldBorder_CubicWorld}.
  */
-@Mixin(Level.class)
+@Mixin(World.class)
 public abstract class MixinLevel_CubicWorld {
 
-    @Shadow private WorldBorder worldBorder;
+    @Shadow private WorldBorder border;
 
     @Unique
     private boolean blockyPlanet_checked = false;
@@ -39,16 +39,16 @@ public abstract class MixinLevel_CubicWorld {
     private void blockyPlanet_ensureInit() {
         if (!blockyPlanet_checked) {
             blockyPlanet_checked = true;
-            Level self = (Level) (Object) this;
+            World self = (World) (Object) this;
             blockyPlanet_isCubic = BlockyPlanetMod.isBlockyPlanetDimension(self);
             if (blockyPlanet_isCubic) {
                 BlockyPlanetMod.getOrCreateStorage(self);
                 // Register this world's border so MixinWorldBorder_CubicWorld
                 // can bypass it without affecting other dimensions.
-                BlockyPlanetMod.BLOCKY_BORDERS.add(this.worldBorder);
+                BlockyPlanetMod.BLOCKY_BORDERS.add(this.border);
                 BlockyPlanetMod.LOGGER.info(
                     "Cubic world mixin active for dimension {}",
-                    self.dimension().location());
+                    self.getRegistryKey().getValue());
             }
         }
     }
@@ -56,7 +56,7 @@ public abstract class MixinLevel_CubicWorld {
     // ─── Unbounded block access ─────────────────────────────────────────────
 
     @Inject(
-        method = "getBlockState(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;",
+        method = "getBlockState(Lnet/minecraft/util/math/BlockPos;)Lnet/minecraft/block/BlockState;",
         at = @At("HEAD"),
         cancellable = true
     )
@@ -64,12 +64,12 @@ public abstract class MixinLevel_CubicWorld {
         blockyPlanet_ensureInit();
         if (!blockyPlanet_isCubic) return;
 
-        PlanetBlockStorage storage = BlockyPlanetMod.getOrCreateStorage((Level) (Object) this);
+        PlanetBlockStorage storage = BlockyPlanetMod.getOrCreateStorage((World) (Object) this);
         cir.setReturnValue(storage.getBlockState(pos.getX(), pos.getY(), pos.getZ()));
     }
 
     @Inject(
-        method = "setBlockState(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
+        method = "setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;II)Z",
         at = @At("HEAD"),
         cancellable = true
     )
@@ -78,7 +78,7 @@ public abstract class MixinLevel_CubicWorld {
         blockyPlanet_ensureInit();
         if (!blockyPlanet_isCubic) return;
 
-        PlanetBlockStorage storage = BlockyPlanetMod.getOrCreateStorage((Level) (Object) this);
+        PlanetBlockStorage storage = BlockyPlanetMod.getOrCreateStorage((World) (Object) this);
         storage.setBlockState(pos.getX(), pos.getY(), pos.getZ(), state);
         cir.setReturnValue(true);
     }
@@ -86,15 +86,15 @@ public abstract class MixinLevel_CubicWorld {
     // ─── Remove height limits ───────────────────────────────────────────────
 
     /**
-     * {@code isOutsideBuildHeight(BlockPos)} — always false in Blocky Planet.
+     * {@code isOutOfHeightLimit(BlockPos)} — always false in Blocky Planet.
      */
     @Inject(
-        method = "isOutsideBuildHeight(Lnet/minecraft/core/BlockPos;)Z",
+        method = "isOutOfHeightLimit(Lnet/minecraft/util/math/BlockPos;)Z",
         at = @At("HEAD"),
         cancellable = true,
         require = 0
     )
-    private void blockyPlanet_isOutsideBuildHeight(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
+    private void blockyPlanet_isOutOfHeightLimit(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
         blockyPlanet_ensureInit();
         if (blockyPlanet_isCubic) {
             cir.setReturnValue(false);
@@ -102,15 +102,15 @@ public abstract class MixinLevel_CubicWorld {
     }
 
     /**
-     * {@code isOutsideBuildHeight(int)} — always false in Blocky Planet.
+     * {@code isOutOfHeightLimit(int)} — always false in Blocky Planet.
      */
     @Inject(
-        method = "isOutsideBuildHeight(I)Z",
+        method = "isOutOfHeightLimit(I)Z",
         at = @At("HEAD"),
         cancellable = true,
         require = 0
     )
-    private void blockyPlanet_isOutsideBuildHeight(int y, CallbackInfoReturnable<Boolean> cir) {
+    private void blockyPlanet_isOutOfHeightLimit(int y, CallbackInfoReturnable<Boolean> cir) {
         blockyPlanet_ensureInit();
         if (blockyPlanet_isCubic) {
             cir.setReturnValue(false);
