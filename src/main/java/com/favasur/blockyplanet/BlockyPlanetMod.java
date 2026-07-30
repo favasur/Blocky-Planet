@@ -25,8 +25,12 @@ public class BlockyPlanetMod implements ModInitializer {
     public static final Identifier DIMENSION_ID = Identifier.of(MOD_ID, "blocky_planet");
     public static final Identifier CHUNK_GENERATOR_ID = Identifier.of(MOD_ID, "blocky_planet_generator");
 
-    /** Accessed by the chunk generator during populateNoise. Set when the server starts. */
-    public static World blockyWorld;
+    /**
+     * Accessed by the chunk generator during populateNoise (worker threads)
+     * and set by the SERVER_STARTED listener (server thread). Volatile ensures
+     * worker threads see the update immediately.
+     */
+    public static volatile World blockyWorld;
 
     /** Set of WorldBorder instances that belong to the Blocky Planet dimension. */
     public static final Set<WorldBorder> BLOCKY_BORDERS = ConcurrentHashMap.newKeySet();
@@ -92,7 +96,15 @@ public class BlockyPlanetMod implements ModInitializer {
         return world != null && world.getRegistryKey().getValue().equals(DIMENSION_ID);
     }
 
-    public static PlanetBlockStorage getOrCreateStorage(World world) {
+    /**
+     * Get or create the PlanetBlockStorage for the given world.
+     *
+     * Synchronized because Minecraft's chunk generation thread pool calls
+     * this from multiple threads concurrently, and {@link WeakHashMap} is
+     * not thread-safe (concurrent access can corrupt its internal hash
+     * chains, causing infinite loops).
+     */
+    public static synchronized PlanetBlockStorage getOrCreateStorage(World world) {
         if (!isBlockyPlanetDimension(world)) {
             throw new IllegalStateException("Not a Blocky Planet world: " + world.getRegistryKey().getValue());
         }
