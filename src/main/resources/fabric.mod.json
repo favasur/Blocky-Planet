@@ -5,10 +5,10 @@
   "name": "Blocky Planet",
   "description": "A spherical Minecraft world made of blocks — quad sphere, shell-based depth, radial gravity.",
   "authors": [
-    "BowerByte"
+    "Favasur"
   ],
   "contact": {
-    "homepage": "https://favasur.com/posts/blocky-planet/"
+    "homepage": "https://bowerbyte.com/posts/blocky-planet/"
   },
   "license": "MIT",
   "icon": "assets/blocky_planet/icon.png",
