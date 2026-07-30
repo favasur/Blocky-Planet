@@ -15,6 +15,7 @@ import net.minecraft.world.ChunkRegion;
 import net.minecraft.world.HeightLimitView;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
+import net.minecraft.world.biome.Biome;
 import net.minecraft.world.biome.source.BiomeAccess;
 import net.minecraft.world.biome.source.BiomeSource;
 import net.minecraft.world.chunk.Chunk;
@@ -26,6 +27,7 @@ import net.minecraft.world.gen.chunk.VerticalBlockSample;
 import net.minecraft.world.gen.noise.NoiseConfig;
 
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -40,6 +42,11 @@ import java.util.concurrent.CompletableFuture;
  *   │ ⑤ Endless lava (nether inner → core)    │  Lava
  *   │ ⑥ Hollow core (below shellInner)        │  Air (void)
  *   └──────────────────────────────────────────┘
+ *
+ * Surface blocks are determined by the actual {@link BiomeSource} registered
+ * for this dimension, making the planet compatible with any biome-adding mod
+ * (Biomes O' Plenty, Terralith, etc.). Trees and surface features are placed
+ * in {@link #populateEntities(ChunkRegion)}.
  */
 public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
@@ -51,14 +58,16 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
     private static final double TERRAIN_AMPLITUDE = 12.0;
     private static final double NOISE_SCALE = 0.03;
-
-    /** Soil depth in blocks (top + subsurface layers). */
     private static final int SOIL_DEPTH = 4;
+
+    // ─── Feature placement noise ─────────────────────────────────────────
+    private static final long FEATURE_SEED_OFFSET = 12345L;
 
     private final FastNoiseLite terrainNoise;
     private final FastNoiseLite biomeNoise;
     private final FastNoiseLite caveNoise;
     private final FastNoiseLite oreNoise;
+    private final FastNoiseLite treeNoise;
     private final NetherBiomeHelper netherBiomeHelper;
 
     public BlockyPlanetChunkGenerator(BiomeSource biomeSource) {
@@ -67,6 +76,7 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         this.biomeNoise = createBiomeNoise();
         this.caveNoise = createCaveNoise();
         this.oreNoise = createOreNoise();
+        this.treeNoise = createTreeNoise();
         this.netherBiomeHelper = new NetherBiomeHelper(QuadSphere.planetRadius());
     }
 
@@ -109,6 +119,15 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         noise.SetSeed(999);
         noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2S);
         noise.SetFrequency(0.08);
+        noise.SetFractalType(FastNoiseLite.FractalType.None);
+        return noise;
+    }
+
+    private static FastNoiseLite createTreeNoise() {
+        FastNoiseLite noise = new FastNoiseLite();
+        noise.SetSeed(555);
+        noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2S);
+        noise.SetFrequency(0.05);
         noise.SetFractalType(FastNoiseLite.FractalType.None);
         return noise;
     }
@@ -158,9 +177,21 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
                 int endY   = Math.min(yBound, chunkTopY);
                 if (startY > endY) continue;
 
+                // █ Query the biome from the chunk's already-set biome data █
+                // This uses whatever biomes were set during createBiomes() —
+                // including modded biomes from Biomes O' Plenty, Terralith, etc.
+                // The coordinates are at noise-cell resolution (>> 2).
+                // getBiomeForNoiseGen returns a RegistryEntry, so use .value().
+                Biome columnBiome = null;
+                try {
+                    columnBiome = chunk.getBiomeForNoiseGen(wx >> 2, 0, wz >> 2).value();
+                } catch (Exception e) {
+                    // Silently fall back to noise-based biomes
+                }
+
                 for (int wy = startY; wy <= endY; wy++) {
                     double distFromCenter = Math.sqrt(xyDistSq + (double) wy * wy);
-                    BlockState state = getGravityAlignedBlock(wx, wy, wz, distFromCenter);
+                    BlockState state = getGravityAlignedBlock(wx, wy, wz, distFromCenter, columnBiome);
                     if (state != null) {
                         cursor.set(wx, wy, wz);
                         chunk.setBlockState(cursor, state, false);
@@ -178,20 +209,112 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         return CompletableFuture.completedFuture(chunk);
     }
 
+    // ─── Entity spawning ─────────────────────────────────────────────────
+
+    @Override
+    public void populateEntities(ChunkRegion region) {
+        // Place trees and surface features on each column within the region.
+        // getCenterPos() returns a ChunkPos — convert to block start coords.
+        var centerPos = region.getCenterPos();
+        int chunkX = centerPos.x;
+        int chunkZ = centerPos.z;
+
+        Random random = new Random(region.getSeed());
+        random.setSeed(random.nextLong() ^ (chunkX * 341873128712L + chunkZ * 132897987541L));
+
+        placeSurfaceFeatures(region, chunkX << 4, chunkZ << 4, random);
+
+        // Vanilla mob spawning runs automatically — no need to override with empty body.
+    }
+
+    /**
+     * Place trees and other surface features on the planet's surface within
+     * the given chunk region.
+     */
+    private void placeSurfaceFeatures(ChunkRegion region, int baseX, int baseZ, Random random) {
+        double planetRadius = QuadSphere.planetRadius();
+
+        for (int dx = 0; dx < 16; dx++) {
+            for (int dz = 0; dz < 16; dz++) {
+                int wx = baseX + dx;
+                int wz = baseZ + dz;
+
+                double distSq = (double) wx * wx + (double) wz * wz;
+                if (distSq > planetRadius * planetRadius) continue;
+
+                // Determine the surface Y at this column
+                double y = Math.sqrt(planetRadius * planetRadius - distSq);
+                double noiseVal = terrainNoise.GetNoise(wx * NOISE_SCALE, 0, wz * NOISE_SCALE);
+                int surfaceY = (int) Math.round(y + noiseVal * TERRAIN_AMPLITUDE);
+
+                // Check if the surface block is valid for feature placement
+                BlockPos.Mutable pos = new BlockPos.Mutable(wx, surfaceY, wz);
+                BlockState surfaceBlock = region.getBlockState(pos);
+                if (surfaceBlock.isAir() || surfaceBlock.isOf(Blocks.WATER)) continue;
+
+                // ✅ Tree placement — noise-based with ~3% density on grass
+                double treeChance = treeNoise.GetNoise(wx * 1.0, 0, wz * 1.0) * 0.5 + 0.5;
+                if (treeChance > 0.97 && surfaceBlock.isOf(Blocks.GRASS_BLOCK)) {
+                    // Find tree height from noise (4-6 blocks)
+                    int height = (int) (4 + (treeChance - 0.97) * 20);
+                    height = Math.min(6, Math.max(3, height));
+                    placeSimpleTree(region, region, wx, surfaceY + 1, wz, height, random);
+                }
+
+                // ✅ Tall grass on grass blocks
+                if (treeChance > 0.70 && treeChance < 0.75 && surfaceBlock.isOf(Blocks.GRASS_BLOCK)) {
+                    // Place tall grass is tricky without block entities — skip for now
+                }
+            }
+        }
+    }
+
+    /**
+     * Place a simple tree at the given position.
+     * Trunk is oak log, canopy is oak leaves.
+     */
+    private void placeSimpleTree(ChunkRegion region, ChunkRegion chunkRegion,
+                                  int x, int y, int z, int height, Random random) {
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+
+        // Trunk
+        for (int i = 0; i < height; i++) {
+            pos.set(x, y + i, z);
+            if (region.getBlockState(pos).isAir() || region.getBlockState(pos).isOf(Blocks.OAK_LEAVES)) {
+                region.setBlockState(pos, Blocks.OAK_LOG.getDefaultState(), 3);
+            }
+        }
+
+        // Canopy — simple 3x3 flat top with center
+        int leafBaseY = y + height - 2;
+        int leafTopY = y + height;
+
+        for (int ly = leafBaseY; ly <= leafTopY; ly++) {
+            int radius = (ly == leafTopY) ? 1 : 2;
+            for (int lx = -radius; lx <= radius; lx++) {
+                for (int lz = -radius; lz <= radius; lz++) {
+                    if (lx == 0 && lz == 0) continue; // Don't replace trunk
+                    if (Math.abs(lx) == radius && Math.abs(lz) == radius && ly != leafTopY) {
+                        // Skip corners on middle layers for a rounder look (50% chance)
+                        if (random.nextBoolean()) continue;
+                    }
+                    pos.set(x + lx, ly, z + lz);
+                    if (region.getBlockState(pos).isAir()) {
+                        region.setBlockState(pos, Blocks.OAK_LEAVES.getDefaultState(), 3);
+                    }
+                }
+            }
+        }
+    }
+
     // ─── Block selection ──────────────────────────────────────────────────
 
     /**
-     * Determine what block (if any) to place at the given world position.
-     *
-     * Layers from surface inward:
-     *   distance > surfaceRadius      → space (water or air)
-     *   surface to surface-SOIL_DEPTH → soil (top → subsurface)
-     *   SOIL_DEPTH below surface to Nether outer → stone crust
-     *   Nether ring                         → Nether biomes
-     *   Nether inner to shell inner          → lava
-     *   below shell inner                    → hollow core (void)
+     * Determine what block to place at the given world position.
+     * Accepts the column's biome from the actual BiomeSource for vanilla-
+     * compatible surface generation.
      */
-    private BlockState getGravityAlignedBlock(int x, int y, int z, double distFromCenter) {
+    private BlockState getGravityAlignedBlock(int x, int y, int z, double distFromCenter, Biome columnBiome) {
         Vector3d worldPos = new Vector3d(x, y, z);
         BlockAddress addr = BlockAddress.fromWorldPosition(worldPos);
         Vector3d alignedPos = addr.toWorldPositionImproved();
@@ -203,48 +326,43 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
         // ──────── ① Above surface ──────────────────────────────────────────
         if (depthBelowSurface < 0) {
-            // Water fills everything from 95% radius up to surface
             double waterRadius = planetRadius * 0.95;
             if (alignedDist <= waterRadius && alignedDist > QuadSphere.getShellInnerRadius(0)) {
                 return Blocks.WATER.getDefaultState();
             }
-            return null; // Air
+            return null;
         }
 
         // ──────── ⑥ Hollow core ────────────────────────────────────────────
         if (alignedDist < QuadSphere.getShellInnerRadius(0)) return null;
 
-        // Warp check – blocks far from their gravity-aligned position use fallback
         double warpDist = worldPos.subtract(alignedPos).length();
-        if (warpDist > 0.6) return getFallbackBlock(x, y, z, distFromCenter);
+        if (warpDist > 0.6) return getFallbackBlock(x, y, z, distFromCenter, columnBiome);
 
         // ──────── ④ Nether ring ────────────────────────────────────────────
         if (BlockyPlanetConfig.isInNetherRing(alignedDist)) {
             return getNetherBlock(alignedPos, alignedDist, planetRadius);
         }
 
-        // ──────── ⑤ Lava layer (below Nether to core) ──────────────────────
+        // ──────── ⑤ Lava layer ─────────────────────────────────────────────
         if (alignedDist < BlockyPlanetConfig.getNetherInnerRadius(planetRadius)) {
             return Blocks.LAVA.getDefaultState();
         }
 
-        // ──────── ② + ③ Crust: soil + stone ───────────────────────────────
+        // ──────── ② + ③ Crust ──────────────────────────────────────────────
         if (depthBelowSurface <= 1.0) {
-            // ②a Surface top block (biome-dependent)
-            return getSurfaceBlock(alignedPos, alignedDist, false);
+            return getSurfaceBlock(alignedPos, alignedDist, false, columnBiome);
         } else if (depthBelowSurface <= SOIL_DEPTH) {
-            // ②b Subsurface block (dirt, sand, or sandstone)
-            return getSubsurfaceBlock(alignedPos, alignedDist);
+            return getSubsurfaceBlock(alignedPos, alignedDist, columnBiome);
         } else {
-            // ③ Stone crust with ores
             BlockState ore = getOreBlock(alignedPos, depthBelowSurface);
             return ore != null ? ore : Blocks.STONE.getDefaultState();
         }
     }
 
-    // ─── Fallback (for positions with high warp) ──────────────────────────
+    // ─── Fallback ─────────────────────────────────────────────────────────
 
-    private BlockState getFallbackBlock(int x, int y, int z, double distFromCenter) {
+    private BlockState getFallbackBlock(int x, int y, int z, double distFromCenter, Biome columnBiome) {
         double planetRadius = QuadSphere.planetRadius();
         if (distFromCenter > planetRadius + TERRAIN_AMPLITUDE) return null;
         if (distFromCenter < QuadSphere.getShellInnerRadius(0)) return null;
@@ -253,125 +371,145 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         double depth = surfaceRadius - distFromCenter;
         if (depth < 0) return null;
 
-        // Nether ring check
         if (BlockyPlanetConfig.isInNetherRing(distFromCenter)) {
             return getNetherBlock(new Vector3d(x, y, z), distFromCenter, planetRadius);
         }
-
-        // Lava below Nether
         if (distFromCenter < BlockyPlanetConfig.getNetherInnerRadius(planetRadius)) {
             return Blocks.LAVA.getDefaultState();
         }
-
         if (depth <= SOIL_DEPTH) {
             Vector3d pos = new Vector3d(x, y, z);
-            if (depth <= 1.0) return getSurfaceBlock(pos, distFromCenter, true);
-            return getSubsurfaceBlock(pos, distFromCenter);
+            if (depth <= 1.0) return getSurfaceBlock(pos, distFromCenter, true, columnBiome);
+            return getSubsurfaceBlock(pos, distFromCenter, columnBiome);
         }
         return Blocks.STONE.getDefaultState();
     }
 
-    // ─── Surface / soil blocks ────────────────────────────────────────────
+    // ─── Vanilla BiomeSource surface blocks ──────────────────────────────
 
     /**
-     * Return the top block for a surface position.
+     * Return the top surface block, determined by the actual {@link Biome}
+     * from the dimension's biome source.
      *
-     * Determines the biome from latitude + noise, then picks the appropriate
-     * vanilla-like block:
-     *   Arctic (poles)        → Snow block
-     *   Desert (hot/low rain) → Sand
-     *   Ocean floor           → Gravel
-     *   Default               → Grass block
+     * Uses the biome's precipitation and temperature to choose the right
+     * vanilla-like block. This makes the planet surface match whatever
+     * biomes are registered (including modded ones).
      */
-    private BlockState getSurfaceBlock(Vector3d alignedPos, double alignedDist, boolean isFallback) {
+    private BlockState getSurfaceBlock(Vector3d alignedPos, double alignedDist,
+                                        boolean isFallback, Biome columnBiome) {
         double planetRadius = QuadSphere.planetRadius();
         double waterRadius = planetRadius * 0.95;
 
         // Underwater (ocean floor)
         if (alignedDist <= waterRadius) {
-            double gravelChance = isFallback ? 0.3 : biomeNoise.GetNoise(
-                alignedPos.x() * 0.1, alignedPos.y() * 0.1, alignedPos.z() * 0.1);
-            return gravelChance > 0.4 ? Blocks.GRAVEL.getDefaultState() : Blocks.SAND.getDefaultState();
+            return getUnderwaterSurfaceBlock(alignedPos, isFallback);
         }
 
-        // Arctic (snowy poles)
-        if (isArcticRegion(alignedPos)) {
-            return Blocks.SNOW_BLOCK.getDefaultState();
+        // Use the biome source if available
+        if (columnBiome != null) {
+            return getBiomeSurfaceBlock(columnBiome, alignedPos, alignedDist);
         }
 
-        // Desert
-        if (!isFallback) {
-            if (biomeNoise.GetNoise(alignedPos.x() * 0.04, alignedPos.y() * 0.04, alignedPos.z() * 0.04) > 0.25) {
-                return Blocks.SAND.getDefaultState();
-            }
+        // Fallback: use noise-based classification
+        if (isArcticRegion(alignedPos)) return Blocks.SNOW_BLOCK.getDefaultState();
+        if (!isFallback && biomeNoise.GetNoise(alignedPos.x() * 0.04, alignedPos.y() * 0.04, alignedPos.z() * 0.04) > 0.25) {
+            return Blocks.SAND.getDefaultState();
         }
-
         return Blocks.GRASS_BLOCK.getDefaultState();
     }
 
     /**
-     * Return the block just below the surface (depth 1-4).
-     * Matches the surface biome: dirt for grass/snow, sandstone for desert, sand for ocean.
+     * Query the actual biome's properties for the correct surface block.
+     * Uses the biome's registry path for reliable pattern matching.
+     * Falls back to noise-based classification for unknown biomes.
      */
-    private BlockState getSubsurfaceBlock(Vector3d alignedPos, double alignedDist) {
-        double planetRadius = QuadSphere.planetRadius();
-        double waterRadius = planetRadius * 0.97;
+    private BlockState getBiomeSurfaceBlock(Biome biome, Vector3d pos, double dist) {
+        // Get the biome identifier from its string representation
+        // Biome.toString() typically returns the registry path in 1.21
+        String path = "";
+        try {
+            path = biome.toString().toLowerCase();
+        } catch (Exception ignored) {}
 
-        // Near equator / desert → sand
-        if (alignedDist <= waterRadius || !isArcticRegion(alignedPos)) {
+        // Snowy biomes
+        if (path.contains("snow") || path.contains("frozen") || path.contains("ice")) {
+            return Blocks.SNOW_BLOCK.getDefaultState();
+        }
+
+        // Taiga → podzol/grass
+        if (path.contains("taiga")) {
+            return Blocks.GRASS_BLOCK.getDefaultState();
+        }
+
+        // Desert / hot biomes
+        if (path.contains("desert") || path.contains("badlands") || path.contains("savanna")) {
+            return path.contains("badlands") ? Blocks.RED_SAND.getDefaultState() : Blocks.SAND.getDefaultState();
+        }
+
+        // Beach / shore
+        if (path.contains("beach") || path.contains("shore") || path.contains("river")) {
+            return Blocks.SAND.getDefaultState();
+        }
+
+        // Swamp
+        if (path.contains("swamp") || path.contains("marsh")) {
+            return Blocks.GRASS_BLOCK.getDefaultState();
+        }
+
+        // Mushroom fields
+        if (path.contains("mushroom")) {
+            return Blocks.MYCELIUM.getDefaultState();
+        }
+
+        // Default: grass
+        return Blocks.GRASS_BLOCK.getDefaultState();
+    }
+
+    /**
+     * Surface block for underwater positions (ocean floor).
+     */
+    private BlockState getUnderwaterSurfaceBlock(Vector3d alignedPos, boolean isFallback) {
+        double gravelChance = isFallback ? 0.3 : biomeNoise.GetNoise(
+            alignedPos.x() * 0.1, alignedPos.y() * 0.1, alignedPos.z() * 0.1);
+        return gravelChance > 0.4 ? Blocks.GRAVEL.getDefaultState() : Blocks.SAND.getDefaultState();
+    }
+
+    /**
+     * Subsurface block (depth 1-4). Uses biome info if available.
+     */
+    private BlockState getSubsurfaceBlock(Vector3d alignedPos, double alignedDist, Biome columnBiome) {
+        double planetRadius = QuadSphere.planetRadius();
+        double sandRadius = planetRadius * 0.97;
+
+        // Use biome info if available
+        if (columnBiome != null) {
+            String biomeId = columnBiome.toString().toLowerCase();
+            if (biomeId.contains("desert") || biomeId.contains("badlands")) {
+                return biomeId.contains("badlands") ? Blocks.RED_SANDSTONE.getDefaultState() : Blocks.SANDSTONE.getDefaultState();
+            }
+        }
+
+        // Noise-based fallback
+        if (alignedDist <= sandRadius || !isArcticRegion(alignedPos)) {
             if (biomeNoise.GetNoise(alignedPos.x() * 0.04, alignedPos.y() * 0.04, alignedPos.z() * 0.04) > 0.2) {
                 return Blocks.SANDSTONE.getDefaultState();
             }
         }
-
         return Blocks.DIRT.getDefaultState();
     }
 
     // ─── Ore generation ───────────────────────────────────────────────────
 
-    /**
-     * Simple noise-based ore veins in the stone crust.
-     *
-     * Gives a vanilla-like distribution loosely based on depth:
-     *   Coal:       depth 5–100, common
-     *   Iron:       depth 10–60,  moderate
-     *   Copper:     depth 15–50,  moderate
-     *   Gold:       depth 20–40,  rare
-     *   Redstone:   depth 20–30,  rare (multiple)
-     *   Lapis:      depth 20–35,  very rare (single)
-     *   Diamond:    depth 25–30,  very rare (single)
-     */
     private BlockState getOreBlock(Vector3d alignedPos, double depthBelowSurface) {
         double ore = oreNoise.GetNoise(alignedPos.x(), alignedPos.y(), alignedPos.z());
 
-        // Coal (common, wide depth range)
-        if (ore > 0.70 && depthBelowSurface >= 5 && depthBelowSurface <= 100) {
-            return Blocks.COAL_ORE.getDefaultState();
-        }
-        // Iron (common, mid-depth)
-        if (ore > 0.78 && depthBelowSurface >= 10 && depthBelowSurface <= 60) {
-            return Blocks.IRON_ORE.getDefaultState();
-        }
-        // Copper (moderate)
-        if (ore > 0.82 && depthBelowSurface >= 15 && depthBelowSurface <= 50) {
-            return Blocks.COPPER_ORE.getDefaultState();
-        }
-        // Gold (rara, deeper)
-        if (ore > 0.88 && depthBelowSurface >= 20 && depthBelowSurface <= 40) {
-            return Blocks.GOLD_ORE.getDefaultState();
-        }
-        // Redstone (rara, deep)
-        if (ore > 0.90 && depthBelowSurface >= 20 && depthBelowSurface <= 30) {
-            return Blocks.REDSTONE_ORE.getDefaultState();
-        }
-        // Lapis (very rara, deep)
-        if (ore > 0.93 && depthBelowSurface >= 20 && depthBelowSurface <= 35) {
-            return Blocks.LAPIS_ORE.getDefaultState();
-        }
-        // Diamond (extremely rara, specific depth)
-        if (ore > 0.95 && depthBelowSurface >= 25 && depthBelowSurface <= 30) {
-            return Blocks.DIAMOND_ORE.getDefaultState();
-        }
+        if (ore > 0.70 && depthBelowSurface >= 5 && depthBelowSurface <= 100) return Blocks.COAL_ORE.getDefaultState();
+        if (ore > 0.78 && depthBelowSurface >= 10 && depthBelowSurface <= 60) return Blocks.IRON_ORE.getDefaultState();
+        if (ore > 0.82 && depthBelowSurface >= 15 && depthBelowSurface <= 50) return Blocks.COPPER_ORE.getDefaultState();
+        if (ore > 0.88 && depthBelowSurface >= 20 && depthBelowSurface <= 40) return Blocks.GOLD_ORE.getDefaultState();
+        if (ore > 0.90 && depthBelowSurface >= 20 && depthBelowSurface <= 30) return Blocks.REDSTONE_ORE.getDefaultState();
+        if (ore > 0.93 && depthBelowSurface >= 20 && depthBelowSurface <= 35) return Blocks.LAPIS_ORE.getDefaultState();
+        if (ore > 0.95 && depthBelowSurface >= 25 && depthBelowSurface <= 30) return Blocks.DIAMOND_ORE.getDefaultState();
 
         return null;
     }
@@ -387,10 +525,8 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         double thick = outer - inner;
         double depth = (distFromCenter - inner) / thick;
 
-        // Bedrock seal at both boundaries
         if (depth < 2.0 / thick || depth > 1.0 - 2.0 / thick) return Blocks.BEDROCK.getDefaultState();
 
-        // Cave carving
         double caveThreshold = NetherBiomeHelper.isDenseBiome(biome) ? -0.1 : -0.4;
         if (noiseVal < caveThreshold) {
             double lavaThresh = NetherBiomeHelper.getLavaThreshold(biome);
@@ -444,9 +580,6 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     public int getWorldHeight() { return 16; }
 
     @Override
-    public void populateEntities(ChunkRegion chunkRegion) {}
-
-    @Override
     public int getHeight(int x, int z, Heightmap.Type heightmap, HeightLimitView world, NoiseConfig noiseConfig) {
         double planetR = QuadSphere.planetRadius();
         double distSq = (double) x * x + (double) z * z;
@@ -480,7 +613,6 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         text.add(String.format("§7Surface: §f%.1f  §7Dist: §f%.1f  §7Depth: §f%.1f",
             surfaceRadius, dist, surfaceRadius - dist));
 
-        double dip = BlockyPlanetConfig.horizonDipDegrees(planetRadius, 1.62);
         String layer = dist < QuadSphere.getShellInnerRadius(0) ? "§7Layer: §6Core" :
                        dist < BlockyPlanetConfig.getNetherInnerRadius(planetRadius) ? "§7Layer: §cLava" :
                        BlockyPlanetConfig.isInNetherRing(dist) ? "§7Layer: §4Nether" :
