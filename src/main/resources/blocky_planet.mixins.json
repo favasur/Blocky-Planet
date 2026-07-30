@@ -8,11 +8,13 @@
     "MixinLevel_CubicWorld",
     "MixinWorldBorder_CubicWorld",
     "MixinWorldChunk_CubicWorld",
-    "ScreenAccessor"
+    "ScreenAccessor",
+    "StoringChunkProgressListenerAccessor"
   ],
   "client": [
     "client.WorldRendererMixin",
-    "client.ChunkDebugRendererMixin"
+    "client.ChunkDebugRendererMixin",
+    "client.LevelLoadingScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1
