@@ -38,8 +38,9 @@ public class BlockyPlanetModClient implements ClientModInitializer {
     private void addPlanetSizeButton(MinecraftClient client, Screen screen) {
         int btnW = 130;
         int btnH = 20;
-        int rightX = (screen.width / 2) + 8;
-        int topY = 60;
+        // Right column, lined up just above the Game Mode section
+        int rightX = (screen.width / 2) + 5;
+        int topY = 88;
 
         ButtonWidget btn = ButtonWidget.builder(
             Text.literal("⏺ Planet: " + formatDiameter(BlockyPlanetConfig.getPlanetDiameter())),
