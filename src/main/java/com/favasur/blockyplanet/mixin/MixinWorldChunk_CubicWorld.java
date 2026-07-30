@@ -37,6 +37,7 @@ public class MixinWorldChunk_CubicWorld {
     private final Int2ObjectOpenHashMap<LevelChunkSection> blockyPlanet_sectionCache = new Int2ObjectOpenHashMap<>();
 
     /** Invalidate the virtual array cache for a specific chunk. */
+    @Unique
     public static void invalidate(ChunkAccess chunk) {
         blockyPlanet_virtualCache.remove(chunk);
     }
