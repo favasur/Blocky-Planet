@@ -147,6 +147,14 @@ public class MixinWorldChunk_CubicWorld {
     /**
      * Intercept getSection(int) as fallback for code that requests
      * individual sections outside the normal range.
+     *
+     * ALWAYS returns a section (never falls through to vanilla) when
+     * the dimension is Blocky Planet. The vanilla getSection(int)
+     * accesses the tiny section array (24 elements for overworld),
+     * which throws ArrayIndexOutOfBoundsException for our planet
+     * surface at yIndex ≈ 438 (= 7,015 >> 4).  This exception would
+     * prevent chunk completion, causing the world-creation loading
+     * screen to hang at 100 %.
      */
     @Inject(
         method = "getSection(I)Lnet/minecraft/world/chunk/ChunkSection;",
@@ -158,6 +166,7 @@ public class MixinWorldChunk_CubicWorld {
         World world = self.getWorld();
         if (!BlockyPlanetMod.isBlockyPlanetDimension(world)) return;
 
+        // Check per-section cache first
         ChunkSection cached = blockyPlanet_sectionCache.get(yIndex);
         if (cached != null) {
             cir.setReturnValue(cached);
@@ -169,30 +178,30 @@ public class MixinWorldChunk_CubicWorld {
         int chunkZ = self.getPos().z;
         int baseY = yIndex << 4;
 
-        if (!storage.hasAnyInSection(chunkX, yIndex, chunkZ)) {
-            return;
-        }
-
         Registry<Biome> biomeRegistry = world.getRegistryManager().get(RegistryKeys.BIOME);
         ChunkSection section = new ChunkSection(biomeRegistry);
 
         boolean hasBlocks = false;
-        for (int dx = 0; dx < 16; dx++) {
-            for (int dz = 0; dz < 16; dz++) {
-                for (int dy = 0; dy < 16; dy++) {
-                    BlockState state = storage.getBlockState(
-                        chunkX * 16 + dx, baseY + dy, chunkZ * 16 + dz);
-                    if (!state.isAir()) {
-                        section.setBlockState(dx, dy, dz, state, false);
-                        hasBlocks = true;
+        if (storage.hasAnyInSection(chunkX, yIndex, chunkZ)) {
+            for (int dx = 0; dx < 16; dx++) {
+                for (int dz = 0; dz < 16; dz++) {
+                    for (int dy = 0; dy < 16; dy++) {
+                        BlockState state = storage.getBlockState(
+                            chunkX * 16 + dx, baseY + dy, chunkZ * 16 + dz);
+                        if (!state.isAir()) {
+                            section.setBlockState(dx, dy, dz, state, false);
+                            hasBlocks = true;
+                        }
                     }
                 }
             }
         }
 
-        if (hasBlocks) {
-            blockyPlanet_sectionCache.put(yIndex, section);
-            cir.setReturnValue(section);
-        }
+        // Always cache and return the section, even if empty.
+        // Falling through to vanilla getSection would throw
+        // ArrayIndexOutOfBoundsException for yIndex outside the
+        // vanilla section array bounds (0..23 for overworld).
+        blockyPlanet_sectionCache.put(yIndex, section);
+        cir.setReturnValue(section);
     }
 }
