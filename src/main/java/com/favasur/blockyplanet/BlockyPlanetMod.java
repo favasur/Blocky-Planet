@@ -1,8 +1,10 @@
 package com.favasur.blockyplanet;
 
 import com.favasur.blockyplanet.config.BlockyPlanetConfig;
+import com.favasur.blockyplanet.planet.QuadSphere;
 import com.favasur.blockyplanet.world.BlockyPlanetChunkGenerator;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -104,8 +106,18 @@ public class BlockyPlanetMod {
             if (isBlockyPlanetDimension(sl)) {
                 blockyWorld = sl;
                 LOGGER.info("Captured override world: {}", sl.dimension().location());
-                return;
+                break;
             }
+        }
+
+        // ═══ Set spawn position at planet surface ═══
+        if (blockyWorld instanceof ServerLevel planetWorld) {
+            double pr = QuadSphere.planetRadius();
+            // Account for terrain noise (amplitude ±12) plus buffer
+            int surfaceY = (int) Math.round(pr) + 12 + 3;
+            BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
+            planetWorld.setDefaultSpawnPos(spawnPos, 0);
+            BlockyPlanetMod.LOGGER.info("Set planet spawn to {}", spawnPos);
         }
     }
 

@@ -52,6 +52,12 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     private static final double NOISE_SCALE = 0.03;
     private static final int SOIL_DEPTH = 4;
 
+    /**
+     * Maximum Y-range to iterate for per-block generation in each column.
+     * 15 000 blocks covers the crust + nether ring even on Earth-sized planets.
+     */
+    private static final int MAX_ITER_DEPTH = 15_000;
+
     private final FastNoiseLite terrainNoise;
     private final FastNoiseLite biomeNoise;
     private final FastNoiseLite caveNoise;
@@ -127,6 +133,7 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
             storage.removeAllForChunk(chunkX, chunkZ);
         }
 
+        BlockState LAVA = Blocks.LAVA.defaultBlockState();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 
         for (int dx = 0; dx < 16; dx++) {
@@ -140,11 +147,14 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
                 int yBound = (int) Math.floor(Math.sqrt(maxYSq));
 
-                // Use the full planet-geometry Y range, NOT clamped to
-                // the dimension height limits (0..15).  Blocks are
-                // stored in PlanetBlockStorage.
-                int startY = -yBound;
-                int endY   = yBound;
+                // Compute the surface Y for this column (with terrain noise)
+                double baseY = Math.sqrt(planetRadius * planetRadius - xyDistSq);
+                double noiseVal = terrainNoise.GetNoise(wx * NOISE_SCALE, 0, wz * NOISE_SCALE);
+                int surfaceY = (int) Math.round(baseY + noiseVal * TERRAIN_AMPLITUDE);
+
+                // Limit iteration to surface-MAX_ITER_DEPTH..surface.
+                int iterStartY = Math.max(-yBound, surfaceY - MAX_ITER_DEPTH);
+                int iterEndY   = surfaceY;
 
                 // Query biome from the chunk's noise-cell biome data
                 Biome columnBiome = null;
@@ -152,18 +162,35 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
                     columnBiome = chunk.getNoiseBiome(wx >> 2, 0, wz >> 2).value();
                 } catch (Exception ignored) {}
 
-                for (int wy = startY; wy <= endY; wy++) {
+                // ── Phase 1: Fill lava zone below the iteration range ──
+                // Simple per-position loop, no getGravityAlignedBlock overhead.
+                if (iterStartY > -yBound) {
+                    for (int wy = -yBound; wy < iterStartY; wy++) {
+                        double distFromCenter = Math.sqrt(xyDistSq + (double) wy * wy);
+                        if (distFromCenter >= QuadSphere.getShellInnerRadius(0)) {
+                            cursor.set(wx, wy, wz);
+                            chunk.setBlockState(cursor, LAVA, false);
+                            if (storage != null) {
+                                storage.setBlockState(wx, wy, wz, LAVA);
+                            }
+                        }
+                    }
+                }
+
+                // ── Phase 2: Per-block generation for the surface-to-iter range ──
+                for (int wy = iterStartY; wy <= iterEndY; wy++) {
                     double distFromCenter = Math.sqrt(xyDistSq + (double) wy * wy);
                     BlockState state = getGravityAlignedBlock(wx, wy, wz, distFromCenter, columnBiome);
                     if (state != null) {
                         cursor.set(wx, wy, wz);
-                        chunk.setBlockState(cursor, state, false);
+                        // ═══ Store in PlanetBlockStorage FIRST, then set on chunk ═══
                         if (storage != null) {
                             storage.setBlockState(wx, wy, wz, state);
                             BlockAddress addr = BlockAddress.fromWorldPosition(new Vector3d(wx, wy, wz));
                             Vector3d normal = addr.getSurfaceNormal();
                             if (normal != null) storage.setNormal(wx, wy, wz, normal);
                         }
+                        chunk.setBlockState(cursor, state, false);
                     }
                 }
             }
