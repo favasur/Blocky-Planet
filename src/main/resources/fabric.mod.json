@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "blocky_planet",
+  "version": "${version}",
+  "name": "Blocky Planet",
+  "description": "A spherical Minecraft world made of blocks — quad sphere, shell-based depth, radial gravity.",
+  "authors": [
+    "BowerByte"
+  ],
+  "contact": {
+    "homepage": "https://bowerbyte.com/posts/blocky-planet/"
+  },
+  "license": "MIT",
+  "icon": "assets/blocky_planet/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.bowerbyte.blockyplanet.BlockyPlanetMod"
+    ],
+    "client": [
+      "com.bowerbyte.blockyplanet.BlockyPlanetModClient"
+    ]
+  },
+  "mixins": [
+    "blocky_planet.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
