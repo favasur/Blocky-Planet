@@ -17,8 +17,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * Mixin into {@link LevelLoadingScreen#renderChunks} to render the
  * chunk generation progress grid as a CIRCLE instead of a square.
  *
- * Cells fill the circle continuously (cellSize = stepSize), creating
- * a smooth solid-looking circle instead of sparse 2px dots.
+ * All cells are drawn in the full square area (same as vanilla).
+ * A smooth circular mask (Math.sqrt horizontal fills) is overlaid
+ * on the four corners to create a truly round circle.
+ * Size is reduced to half of vanilla's full extent.
  */
 @Mixin(LevelLoadingScreen.class)
 public abstract class LevelLoadingScreenMixin {
@@ -39,36 +41,43 @@ public abstract class LevelLoadingScreenMixin {
 
         int fullDiameter = progressListener.getFullDiameter();
         int stepSize = progressListener.getDiameter();
-        int visualFull = fullDiameter * stepSize;
+
+        // Use half the display size
+        int displaySize = fullDiameter / 2;
+        int displayOffset = (fullDiameter - displaySize) / 2;
+        int visualFull = displaySize * stepSize;
 
         int xStart = centerX - visualFull / 2;
         int yStart = centerY - visualFull / 2;
         int xEnd = xStart + visualFull;
         int yEnd = yStart + visualFull;
 
-        int radius = fullDiameter / 2;
-        int radiusSq = radius * radius;
-
-        // 1. Solid dark background for the full square area
-        guiGraphics.fill(xStart, yStart, xEnd, yEnd, 0x4F000000);
-
+        // Get chunk statuses map
         Long2ObjectOpenHashMap<ChunkStatus> statuses =
             ((StoringChunkProgressListenerAccessor) progressListener).getStatuses();
 
-        // 2. Draw full-size cells filling the circle (cellSize = stepSize = no gaps)
-        int cellSize = stepSize;
-        for (int i = 0; i < fullDiameter; i++) {
-            for (int j = 0; j < fullDiameter; j++) {
-                int dx = i - radius;
-                int dz = j - radius;
-                if (dx * dx + dz * dz > radiusSq) continue;
-
-                ChunkStatus status = statuses.get(ChunkPos.asLong(i, j));
+        // 1. Draw colored cells in the FULL square area (no circular clip)
+        int cellSize = pixelSize + centerSizeDiv; // 2px (matches vanilla)
+        for (int i = 0; i < displaySize; i++) {
+            for (int j = 0; j < displaySize; j++) {
+                ChunkStatus status = statuses.get(
+                    ChunkPos.asLong(i + displayOffset, j + displayOffset));
                 int cellX = xStart + i * stepSize;
                 int cellY = yStart + j * stepSize;
                 guiGraphics.fill(cellX, cellY, cellX + cellSize, cellY + cellSize,
                                  getStatusColor(status));
             }
+        }
+
+        // 2. Smooth circular mask — hides cells outside the circle
+        int r = visualFull / 2;
+        int maskColor = 0xFF000000; // fully opaque black
+        for (int px = -r; px <= r; px++) {
+            int limit = (int) Math.round(Math.sqrt(r * r - px * px));
+            // Top corner
+            guiGraphics.fill(centerX + px, yStart, centerX + px + 1, centerY - limit, maskColor);
+            // Bottom corner
+            guiGraphics.fill(centerX + px, centerY + limit + 1, centerX + px + 1, yEnd, maskColor);
         }
     }
 
