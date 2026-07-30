@@ -130,9 +130,14 @@ public class MixinWorldChunk_CubicWorld {
                         }
                     }
                 }
-                if (hasBlocks) virtual[i] = sec;
+                if (hasBlocks) {
+                    virtual[i] = sec;
+                    continue;
+                }
             }
-            // No section → null (renderer skips null entries)
+            // Always assign a section — never null, otherwise server-side
+            // chunk ticking code crashes with NullPointerException
+            virtual[i] = new ChunkSection(biomeReg);
         }
 
         SectionCache.put(chunk, virtual);
