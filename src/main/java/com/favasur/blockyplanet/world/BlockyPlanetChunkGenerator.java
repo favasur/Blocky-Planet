@@ -19,6 +19,7 @@ import net.minecraft.world.biome.Biome;
 import net.minecraft.world.biome.source.BiomeAccess;
 import net.minecraft.world.biome.source.BiomeSource;
 import net.minecraft.world.chunk.Chunk;
+import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.world.gen.GenerationStep;
 import net.minecraft.world.gen.StructureAccessor;
 import net.minecraft.world.gen.chunk.Blender;
@@ -488,10 +489,16 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
      * Subsurface block (depth 1-4). Uses biome info if available.
      */
     /**
-     * Read a surface block from the Tellus overworld via equirectangular projection.
-     * Projects the planet's spherical position to flat overworld coordinates,
-     * reads the Tellus-generated biome at that position, and returns the
-     * appropriate surface block for that biome.
+     * Read the ACTUAL surface block from the Tellus overworld via equirectangular
+     * projection. Projects the planet's spherical position to flat overworld
+     * coordinates, reads the topmost non-air block at that position from
+     * the Tellus-generated chunk, and returns it directly.
+     *
+     * This gives the player Tellus's actual Earth terrain blocks (grass,
+     * stone, sand, etc.) wrapped around the spherical planet.
+     *
+     * Falls back to our biome-mapped surface on any error (chunk not loaded,
+     * Tellus not available, etc.).
      */
     private BlockState getTellusSurfaceBlock(Vector3d alignedPos) {
         try {
@@ -510,32 +517,39 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
             double lon = Math.atan2(nz, nx);           // -π to π
 
             // Equirectangular projection to overworld flat coordinates
-            // 1 radian = planetRadius blocks on the surface
             double scale = QuadSphere.planetRadius();
             int ox = (int) Math.round(lon * scale);
             int oz = (int) Math.round(lat * scale);
 
-            // Sample the Tellus overworld biome at the projected position
-            // Use Y=0 for biome sampling (biomes are 2D in 1.21)
-            Biome tellusBiome = overworld.getBiome(new BlockPos(ox, 0, oz)).value();
-            if (tellusBiome == null) return null;
-
-            // Also check if underwater in the Tellus overworld at this point
-            // Query the surface height to determine if it's ocean
-            int overworldSurfaceY = overworld.getTopY(Heightmap.Type.WORLD_SURFACE, ox, oz);
-            if (overworldSurfaceY <= overworld.getSeaLevel()) {
-                // Ocean or below sea level — use gravel/sand matching Tellus
-                String tPath = getBiomePath(tellusBiome);
-                if (tPath.contains("deep") || tPath.contains("ocean")) {
-                    return Blocks.GRAVEL.getDefaultState();
-                }
-                return Blocks.SAND.getDefaultState();
+            // Check if the Tellus chunk is loaded — if not, skip to avoid
+            // forcing chunk loads from a worker thread.
+            int chunkX = ox >> 4;
+            int chunkZ = oz >> 4;
+            if (!overworld.getChunkManager().isChunkLoaded(chunkX, chunkZ)) {
+                return null;
             }
 
-            // Return the biome-matching surface block
-            return getBiomeSurfaceBlock(tellusBiome, alignedPos, dist);
+            // Get the chunk and read the topmost non-air surface block
+            // Use sampleHeightmap for the surface Y, then read the block there
+            WorldChunk tellusChunk = overworld.getChunk(chunkX, chunkZ);
+            int topY = tellusChunk.sampleHeightmap(Heightmap.Type.WORLD_SURFACE, ox, oz);
+            BlockPos surfacePos = new BlockPos(ox, topY, oz);
+            BlockState tellusBlock = overworld.getBlockState(surfacePos);
+
+            // If we got a valid non-air block, use it directly
+            if (tellusBlock != null && !tellusBlock.isAir() && tellusBlock.getBlock() != Blocks.VOID_AIR) {
+                return tellusBlock;
+            }
+
+            // Fallback: use the Tellus biome to determine surface block type
+            Biome tellusBiome = overworld.getBiome(surfacePos).value();
+            if (tellusBiome != null) {
+                return getBiomeSurfaceBlock(tellusBiome, alignedPos, dist);
+            }
+
+            return null;
         } catch (Exception e) {
-            return null; // Silently fall back
+            return null; // Silently fall back to our generation
         }
     }
 

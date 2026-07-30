@@ -8,6 +8,7 @@ import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.world.World;
 import net.minecraft.world.biome.Biome;
+import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.WorldChunk;
 import org.spongepowered.asm.mixin.Mixin;
@@ -17,7 +18,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Mixin into {@link WorldChunk} to serve blocks from {@link PlanetBlockStorage}
+ * Mixin into {@link Chunk} to serve blocks from {@link PlanetBlockStorage}
  * to the vanilla renderer at ANY Y coordinate, not just Y=0..15.
  *
  * Without this mixin, blocks at Y > 15 are stored in PlanetBlockStorage but
@@ -25,8 +26,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * (since dimension height=16). The renderer calls getSection(yIndex) for
  * each section it wants to draw, and we intercept that to create
  * ChunkSection objects from our unbounded cube storage.
+ *
+ * Targets {@link Chunk} instead of {@link WorldChunk} because
+ * {@code getSection(int)} is declared on the abstract {@link Chunk} class,
+ * and {@link WorldChunk} inherits it. Mixin cannot find inherited methods
+ * when targeting the subclass.
  */
-@Mixin(WorldChunk.class)
+@Mixin(Chunk.class)
 public class MixinWorldChunk_CubicWorld {
 
     @Unique
@@ -43,7 +49,7 @@ public class MixinWorldChunk_CubicWorld {
         require = 0
     )
     private void blockyPlanet_getSection(int yIndex, CallbackInfoReturnable<ChunkSection> cir) {
-        WorldChunk self = (WorldChunk) (Object) this;
+        if (!((Object) this instanceof WorldChunk self)) return;
         World world = self.getWorld();
         if (!BlockyPlanetMod.isBlockyPlanetDimension(world)) return;
 

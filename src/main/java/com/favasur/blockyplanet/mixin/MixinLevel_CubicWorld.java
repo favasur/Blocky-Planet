@@ -83,37 +83,4 @@ public abstract class MixinLevel_CubicWorld {
         cir.setReturnValue(true);
     }
 
-    // ─── Remove height limits ───────────────────────────────────────────────
-
-    /**
-     * {@code isOutOfHeightLimit(BlockPos)} — always false in Blocky Planet.
-     */
-    @Inject(
-        method = "isOutOfHeightLimit(Lnet/minecraft/util/math/BlockPos;)Z",
-        at = @At("HEAD"),
-        cancellable = true,
-        require = 0
-    )
-    private void blockyPlanet_isOutOfHeightLimit(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
-        blockyPlanet_ensureInit();
-        if (blockyPlanet_isCubic) {
-            cir.setReturnValue(false);
-        }
-    }
-
-    /**
-     * {@code isOutOfHeightLimit(int)} — always false in Blocky Planet.
-     */
-    @Inject(
-        method = "isOutOfHeightLimit(I)Z",
-        at = @At("HEAD"),
-        cancellable = true,
-        require = 0
-    )
-    private void blockyPlanet_isOutOfHeightLimit(int y, CallbackInfoReturnable<Boolean> cir) {
-        blockyPlanet_ensureInit();
-        if (blockyPlanet_isCubic) {
-            cir.setReturnValue(false);
-        }
-    }
 }
