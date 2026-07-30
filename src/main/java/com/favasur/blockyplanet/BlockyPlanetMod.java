@@ -1,6 +1,7 @@
 package com.favasur.blockyplanet;
 
 import com.favasur.blockyplanet.config.BlockyPlanetConfig;
+import com.favasur.blockyplanet.planet.QuadSphere;
 import com.favasur.blockyplanet.world.BlockyPlanetChunkGenerator;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
 import net.fabricmc.api.ModInitializer;
@@ -9,6 +10,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.registry.Registry;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.minecraft.world.border.WorldBorder;
 import org.slf4j.Logger;
@@ -88,6 +90,17 @@ public class BlockyPlanetMod implements ModInitializer {
                         break;
                     }
                 }
+            }
+
+            // ═══ Set spawn position at planet surface ═══
+            ServerWorld planetWorld = (ServerWorld) blockyWorld;
+            if (planetWorld != null) {
+                double pr = QuadSphere.planetRadius();
+                // Account for terrain noise (amplitude ±12) plus buffer
+                int surfaceY = (int) Math.round(pr) + 12 + 3; // radius + noise_amplitude + safety margin
+                BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
+                planetWorld.setSpawnPos(spawnPos, 0);
+                LOGGER.info("Set planet spawn to {}", spawnPos);
             }
         });
 

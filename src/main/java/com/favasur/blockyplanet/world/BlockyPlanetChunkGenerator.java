@@ -61,6 +61,14 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     private static final double NOISE_SCALE = 0.03;
     private static final int SOIL_DEPTH = 4;
 
+    /**
+     * Maximum Y-range to iterate for per-block generation in each column.
+     * Blocks from (surfaceY − MAX_ITER_DEPTH) down to the planet core are
+     * filled as lava in bulk via {@link PlanetBlockStorage#fillVolume}.
+     * 15 000 blocks covers the crust + nether ring even on Earth-sized planets.
+     */
+    private static final int MAX_ITER_DEPTH = 15_000;
+
     // ─── Feature placement noise ─────────────────────────────────────────
     private static final long FEATURE_SEED_OFFSET = 12345L;
 
@@ -161,6 +169,7 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
             storage.removeAllForChunk(chunkX, chunkZ);
         }
 
+        BlockState LAVA = Blocks.LAVA.getDefaultState();
         BlockPos.Mutable cursor = new BlockPos.Mutable();
 
         for (int dx = 0; dx < 16; dx++) {
@@ -174,18 +183,19 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
                 int yBound = (int) Math.floor(Math.sqrt(maxYSq));
 
-                // Use the full planet-geometry Y range, NOT clamped to
-                // chunkBottomY..chunkTopY (0..15).  Blocks are stored in
-                // PlanetBlockStorage and the virtual section array makes
-                // them visible regardless of the dimension's height setting.
-                int startY = -yBound;
-                int endY   = yBound;
+                // Compute the surface Y for this column (with terrain noise)
+                double baseY = Math.sqrt(planetRadius * planetRadius - xyDistSq);
+                double noiseVal = terrainNoise.GetNoise(wx * NOISE_SCALE, 0, wz * NOISE_SCALE);
+                int surfaceY = (int) Math.round(baseY + noiseVal * TERRAIN_AMPLITUDE);
+
+                // Limit iteration to surface-MAX_ITER_DEPTH..surface.
+                // Everything below the iteration range is lava (bulk-filled)
+                // or void (hollow core). This prevents 7B+ iterations/column
+                // for Earth-sized planets.
+                int iterStartY = Math.max(-yBound, surfaceY - MAX_ITER_DEPTH);
+                int iterEndY   = surfaceY;
 
                 // █ Query the biome from the chunk's already-set biome data █
-                // This uses whatever biomes were set during createBiomes() —
-                // including modded biomes from Biomes O' Plenty, Terralith, etc.
-                // The coordinates are at noise-cell resolution (>> 2).
-                // getBiomeForNoiseGen returns a RegistryEntry, so use .value().
                 Biome columnBiome = null;
                 try {
                     columnBiome = chunk.getBiomeForNoiseGen(wx >> 2, 0, wz >> 2).value();
@@ -193,18 +203,42 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
                     // Silently fall back to noise-based biomes
                 }
 
-                for (int wy = startY; wy <= endY; wy++) {
+                // ── Phase 1: Fill lava zone below the iteration range ──
+                // Simple per-position loop, no getGravityAlignedBlock overhead.
+                // For Earth-sized planets the lava range can be large (millions
+                // of blocks), but for most planet sizes it's under 15 000 blocks
+                // per column — fast enough for chunk generation.
+                if (iterStartY > -yBound) {
+                    for (int wy = -yBound; wy < iterStartY; wy++) {
+                        double distFromCenter = Math.sqrt(xyDistSq + (double) wy * wy);
+                        if (distFromCenter >= QuadSphere.getShellInnerRadius(0)) {
+                            cursor.set(wx, wy, wz);
+                            chunk.setBlockState(cursor, LAVA, false);
+                            if (storage != null) {
+                                storage.setBlockState(wx, wy, wz, LAVA);
+                            }
+                        }
+                    }
+                }
+
+                // ── Phase 2: Per-block generation for the surface-to-iter range ──
+                for (int wy = iterStartY; wy <= iterEndY; wy++) {
                     double distFromCenter = Math.sqrt(xyDistSq + (double) wy * wy);
                     BlockState state = getGravityAlignedBlock(wx, wy, wz, distFromCenter, columnBiome);
                     if (state != null) {
                         cursor.set(wx, wy, wz);
-                        chunk.setBlockState(cursor, state, false);
+                        // ═══ IMPORTANT: store in PlanetBlockStorage FIRST ═══
+                        // Then set on chunk. This ensures that when
+                        // chunk.setBlockState calls getSection(yIndex), our
+                        // mixin finds blocks in PlanetBlockStorage and
+                        // correctly creates/populates the virtual section.
                         if (storage != null) {
                             storage.setBlockState(wx, wy, wz, state);
                             BlockAddress addr = BlockAddress.fromWorldPosition(new Vector3d(wx, wy, wz));
                             Vector3d normal = addr.getSurfaceNormal();
                             if (normal != null) storage.setNormal(wx, wy, wz, normal);
                         }
+                        chunk.setBlockState(cursor, state, false);
                     }
                 }
             }

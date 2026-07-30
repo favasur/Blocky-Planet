@@ -149,6 +149,44 @@ public class PlanetBlockStorage {
         }
     }
 
+    /**
+     * Fill a rectangular volume with a block state, creating any
+     * missing cubes along the way. Much faster than calling
+     * setBlockState for each individual block position because
+     * it allocates and fills entire 4096-element cube arrays at
+     * once instead of iterating per-block.
+     *
+     * @param minX  Minimum world X (inclusive)
+     * @param minY  Minimum world Y (inclusive)
+     * @param minZ  Minimum world Z (inclusive)
+     * @param maxX  Maximum world X (inclusive)
+     * @param maxY  Maximum world Y (inclusive)
+     * @param maxZ  Maximum world Z (inclusive)
+     * @param state The BlockState to fill with (typically LAVA)
+     */
+    public synchronized void fillVolume(int minX, int minY, int minZ,
+                                         int maxX, int maxY, int maxZ,
+                                         BlockState state) {
+        int minCX = minX >> 4, maxCX = maxX >> 4;
+        int minCY = minY >> 4, maxCY = maxY >> 4;
+        int minCZ = minZ >> 4, maxCZ = maxZ >> 4;
+
+        for (int cx = minCX; cx <= maxCX; cx++) {
+            for (int cy = minCY; cy <= maxCY; cy++) {
+                for (int cz = minCZ; cz <= maxCZ; cz++) {
+                    long k = key(cx, cy, cz);
+                    BlockState[] blocks = cubes.get(k);
+                    if (blocks == null) {
+                        blocks = new BlockState[4096];
+                        cubes.put(k, blocks);
+                    }
+                    // Fill the entire cube with the given state
+                    Arrays.fill(blocks, state);
+                }
+            }
+        }
+    }
+
     public synchronized int size() {
         return cubes.size();
     }
