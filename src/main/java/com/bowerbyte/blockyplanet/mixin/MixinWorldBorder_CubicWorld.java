@@ -1,5 +1,6 @@
 package com.bowerbyte.blockyplanet.mixin;
 
+import com.bowerbyte.blockyplanet.BlockyPlanetMod;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.border.WorldBorder;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * space-travel mods such as Cosmic Horizons.
  *
  * Only affects WorldBorder instances registered in
- * {@link MixinLevel_CubicWorld#BLOCKY_BORDERS}, so other dimensions
+ * {@link BlockyPlanetMod#BLOCKY_BORDERS}, so other dimensions
  * (Overworld, Nether, End) keep their normal world borders.
  *
  * Registration happens when the World is initialized — see the
@@ -33,7 +34,7 @@ public abstract class MixinWorldBorder_CubicWorld {
         require = 0
     )
     private void blockyPlanet_contains(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
-        if (MixinLevel_CubicWorld.BLOCKY_BORDERS.contains(this)) {
+        if (BlockyPlanetMod.BLOCKY_BORDERS.contains(this)) {
             cir.setReturnValue(true);
         }
     }
@@ -48,7 +49,7 @@ public abstract class MixinWorldBorder_CubicWorld {
         require = 0
     )
     private void blockyPlanet_contains(double x, double z, CallbackInfoReturnable<Boolean> cir) {
-        if (MixinLevel_CubicWorld.BLOCKY_BORDERS.contains(this)) {
+        if (BlockyPlanetMod.BLOCKY_BORDERS.contains(this)) {
             cir.setReturnValue(true);
         }
     }
@@ -63,7 +64,7 @@ public abstract class MixinWorldBorder_CubicWorld {
         require = 0
     )
     private void blockyPlanet_contains(double x, double y, double z, CallbackInfoReturnable<Boolean> cir) {
-        if (MixinLevel_CubicWorld.BLOCKY_BORDERS.contains(this)) {
+        if (BlockyPlanetMod.BLOCKY_BORDERS.contains(this)) {
             cir.setReturnValue(true);
         }
     }

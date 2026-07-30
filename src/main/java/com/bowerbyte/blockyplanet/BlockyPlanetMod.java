@@ -9,11 +9,14 @@ import net.minecraft.registry.Registry;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.world.World;
+import net.minecraft.world.border.WorldBorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class BlockyPlanetMod implements ModInitializer {
     public static final String MOD_ID = "blocky_planet";
@@ -24,6 +27,9 @@ public class BlockyPlanetMod implements ModInitializer {
 
     /** Accessed by the chunk generator during populateNoise. Set when the server starts. */
     public static World blockyWorld;
+
+    /** Set of WorldBorder instances that belong to the Blocky Planet dimension. */
+    public static final Set<WorldBorder> BLOCKY_BORDERS = ConcurrentHashMap.newKeySet();
 
     private static final Map<World, PlanetBlockStorage> CUBE_STORAGE_MAP = new WeakHashMap<>();
 

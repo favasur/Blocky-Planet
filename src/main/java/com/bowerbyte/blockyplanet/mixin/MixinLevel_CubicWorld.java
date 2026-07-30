@@ -14,9 +14,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-
 /**
  * Mixin into {@link World} to remove all world boundaries for the Blocky
  * Planet dimension:
@@ -31,9 +28,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public abstract class MixinLevel_CubicWorld {
 
     @Shadow private WorldBorder border;
-
-    /** Set of WorldBorder instances that belong to the Blocky Planet dimension. */
-    static final Set<WorldBorder> BLOCKY_BORDERS = ConcurrentHashMap.newKeySet();
 
     @Unique
     private boolean blockyPlanet_checked = false;
@@ -51,7 +45,7 @@ public abstract class MixinLevel_CubicWorld {
                 BlockyPlanetMod.getOrCreateStorage(self);
                 // Register this world's border so MixinWorldBorder_CubicWorld
                 // can bypass it without affecting other dimensions.
-                BLOCKY_BORDERS.add(this.border);
+                BlockyPlanetMod.BLOCKY_BORDERS.add(this.border);
                 BlockyPlanetMod.LOGGER.info(
                     "Cubic world mixin active for dimension {}",
                     self.getRegistryKey().getValue());
