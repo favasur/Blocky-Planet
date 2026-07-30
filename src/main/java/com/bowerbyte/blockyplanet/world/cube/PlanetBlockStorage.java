@@ -100,6 +100,15 @@ public class PlanetBlockStorage {
         return cubes.containsKey(key(cx, cy, cz));
     }
 
+    /**
+     * Quick check if ANY cube exists in this chunk's XZ column at the given section Y.
+     * Used by the WorldChunk section mixin to avoid creating empty ChunkSections.
+     */
+    public boolean hasAnyInSection(int chunkX, int sectionY, int chunkZ) {
+        // Check the single cube at this Y level for this chunk's X,Z
+        return cubes.containsKey(key(chunkX, sectionY, chunkZ));
+    }
+
     public void removeCube(int cx, int cy, int cz) {
         long k = key(cx, cy, cz);
         cubes.remove(k);
