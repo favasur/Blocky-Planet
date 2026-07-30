@@ -1,6 +1,5 @@
 package com.favasur.blockyplanet.mixin.client;
 
-import com.favasur.blockyplanet.BlockyPlanetMod;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.world.LevelLoadingScreen;
 import net.minecraft.server.WorldGenerationProgressTracker;
@@ -14,14 +13,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Mixin into {@link LevelLoadingScreen#drawChunkMap} to render the
  * chunk generation progress grid as a CIRCLE instead of a square
- * when generating a Blocky Planet world.
+ * — same opaque visual style as vanilla, just clipped to a circle.
  */
 @Mixin(LevelLoadingScreen.class)
 public abstract class LevelLoadingScreenMixin {
 
-    /**
-     * Replace drawChunkMap for Blocky Planet worlds with a circular version.
-     */
     @Inject(
         method = "drawChunkMap(Lnet/minecraft/client/gui/DrawContext;Lnet/minecraft/server/WorldGenerationProgressTracker;IIII)V",
         at = @At("HEAD"),
@@ -32,30 +28,31 @@ public abstract class LevelLoadingScreenMixin {
                                                     int centerX, int centerY,
                                                     int pixelSize, int centerSizeDiv,
                                                     CallbackInfo ci) {
-        // Only apply to Blocky Planet dimensions
-        // Note: This method is called during world creation before the dimension
-        // system is fully initialized. We check via the chunk generator.
-        if (pixelSize == 0) return; // Border rendering — keep vanilla
-
-        // For a simpler approach, always render circular — this looks good
-        // for both Blocky Planet and vanilla worlds.
+        if (pixelSize == 0) return; // Border rendering — skip
 
         ci.cancel();
 
-        int cellSize = pixelSize + centerSizeDiv; // Vanilla: pixelSize=2, centerSizeDiv=0 → cellSize=2
+        int cellSize = pixelSize + centerSizeDiv; // 2px cells (matches vanilla)
         int stepSize = progressProvider.getCenterSize();
         int fullSize = progressProvider.getSize();
         int visualFull = fullSize * stepSize;
 
         int xStart = centerX - visualFull / 2;
         int yStart = centerY - visualFull / 2;
-        float radiusSq = (fullSize / 2.0f) * (fullSize / 2.0f);
-        float halfFull = fullSize / 2.0f;
+        int xEnd = xStart + visualFull;
+        int yEnd = yStart + visualFull;
 
+        int radius = fullSize / 2;
+        int radiusSq = radius * radius;
+
+        // 1. Solid dark background for the full square area
+        context.fill(xStart, yStart, xEnd, yEnd, 0x4F000000);
+
+        // 2. Draw colored cells only within the circle
         for (int i = 0; i < fullSize; i++) {
             for (int j = 0; j < fullSize; j++) {
-                float dx = i - halfFull + 0.5f;
-                float dz = j - halfFull + 0.5f;
+                int dx = i - radius;
+                int dz = j - radius;
                 if (dx * dx + dz * dz > radiusSq) continue;
 
                 ChunkStatus status = progressProvider.getChunkStatus(i, j);
@@ -65,14 +62,37 @@ public abstract class LevelLoadingScreenMixin {
                              getStatusColor(status));
             }
         }
+
+        // 3. Draw a visible circular border (2px thick)
+        int borderColor = 0xFF4444AA;
+        int borderR = radius * stepSize + stepSize / 2; // edge of the grid
+
+        // Outer ring (r+1)
+        for (int px = -borderR - 1; px <= borderR + 1; px++) {
+            int py = (int) Math.round(Math.sqrt((borderR + 1) * (borderR + 1) - px * px));
+            int cx = centerX + px;
+            int cy = centerY + py;
+            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
+                context.fill(cx, cy, cx + 1, cy + 1, borderColor);
+            cy = centerY - py;
+            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
+                context.fill(cx, cy, cx + 1, cy + 1, borderColor);
+        }
+        // Inner ring (r)
+        for (int px = -borderR; px <= borderR; px++) {
+            int py = (int) Math.round(Math.sqrt(borderR * borderR - px * px));
+            int cx = centerX + px;
+            int cy = centerY + py;
+            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
+                context.fill(cx, cy, cx + 1, cy + 1, borderColor);
+            cy = centerY - py;
+            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
+                context.fill(cx, cy, cx + 1, cy + 1, borderColor);
+        }
     }
 
-    /**
-     * Map ChunkStatus to its display color (matching vanilla's STATUS_TO_COLOR map).
-     */
     @Unique
     private static int getStatusColor(ChunkStatus status) {
-        // Matches vanilla STATUS_TO_COLOR mapping with full alpha
         if (status == ChunkStatus.EMPTY) return 0xFF555555;
         if (status == ChunkStatus.STRUCTURE_STARTS) return 0xFF888888;
         if (status == ChunkStatus.STRUCTURE_REFERENCES) return 0xFF999999;
