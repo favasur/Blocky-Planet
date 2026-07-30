@@ -500,9 +500,13 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
     // ─── Vanilla API ─────────────────────────────────────────────────────
 
-    @Override public int getMinY() { return 0; }
+    @Override public int getMinY() {
+        return -(int) QuadSphere.planetRadius() - 128;
+    }
     @Override public int getSeaLevel() { return 0; }
-    @Override public int getGenDepth() { return 16; }
+    @Override public int getGenDepth() {
+        return (int) (QuadSphere.planetRadius() * 2 + 256);
+    }
 
     @Override
     public NoiseColumn getBaseColumn(int x, int z, LevelHeightAccessor a, RandomState r) {
