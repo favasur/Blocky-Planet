@@ -17,8 +17,8 @@ public final class BlockyPlanetConfig {
     /** Largest planet diameter (blocks) = 129 000 km. */
     public static final int MAX_DIAMETER = 129_000_000;
 
-    /** Default planet diameter (blocks) = Earth diameter = 12,742 km. */
-    public static final int DEFAULT_DIAMETER = 12_742_000;
+    /** Default planet diameter (blocks) = 14 km — instantly testable without slider adjustment. */
+    public static final int DEFAULT_DIAMETER = 14_000;
 
     /** Conversions. */
     public static final double BLOCKS_PER_KM = 1000.0;
