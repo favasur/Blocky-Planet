@@ -2,6 +2,7 @@ package com.favasur.blockyplanet;
 
 import com.favasur.blockyplanet.config.BlockyPlanetConfig;
 import com.favasur.blockyplanet.gui.PlanetSizeScreen;
+import com.favasur.blockyplanet.mixin.ScreenAccessor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -51,8 +52,8 @@ public class BlockyPlanetModClient {
             }
         ).bounds(rightX, topY, btnW, btnH).build();
 
-        // Access transformer makes addRenderableWidget accessible
-        screen.addRenderableWidget(btn);
+        // Use mixin accessor to call the protected addRenderableWidget method
+        ((ScreenAccessor) screen).invokeAddRenderableWidget(btn);
     }
 
     private static String formatDiameter(int d) {

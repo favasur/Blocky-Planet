@@ -46,7 +46,7 @@ public class BlockyPlanetMod {
 
         NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onServerStarted);
 
-        modBus.addListener(BlockyPlanetModClient::init);
+        BlockyPlanetModClient.init();
         NeoForge.EVENT_BUS.addListener(BlockyPlanetModClient::onScreenInit);
 
         LOGGER.info("Blocky Planet initialized! Default planet radius: {} blocks ({} km)",

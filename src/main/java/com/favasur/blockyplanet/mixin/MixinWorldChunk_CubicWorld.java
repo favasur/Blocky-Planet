@@ -66,7 +66,7 @@ public class MixinWorldChunk_CubicWorld {
         }
 
         // Create a new LevelChunkSection populated from PlanetBlockStorage
-        Registry<Biome> biomeRegistry = world.registryAccess().lookupOrThrow(Registries.BIOME);
+        Registry<Biome> biomeRegistry = world.registryAccess().registryOrThrow(Registries.BIOME);
         LevelChunkSection section = new LevelChunkSection(biomeRegistry);
 
         boolean hasBlocks = false;

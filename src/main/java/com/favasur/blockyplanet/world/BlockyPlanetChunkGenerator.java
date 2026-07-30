@@ -11,17 +11,19 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.NoiseColumn;
+import net.minecraft.world.level.StructureManager;
+import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
-import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
-import net.minecraft.world.level.levelgen.Beardifier;
 import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
-import net.minecraft.world.level.levelgen.structure.StructureSet;
+import net.minecraft.server.level.WorldGenRegion;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -89,13 +91,16 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     }
 
     @Override
-    public void applyCarvers(ChunkAccess chunk, GenerationStep.Carving carverStep, RandomState random, LevelHeightAccessor heightAccessor) {}
+    public void applyCarvers(WorldGenRegion region, long seed, RandomState random, BiomeManager biomeManager, StructureManager structureManager, ChunkAccess chunk, GenerationStep.Carving carving) {}
 
     @Override
-    public void buildSurface(ChunkAccess chunk, LevelHeightAccessor heightAccessor, RandomState random) {}
+    public void buildSurface(WorldGenRegion region, StructureManager structureManager, RandomState random, ChunkAccess chunk) {}
 
     @Override
-    public CompletableFuture<ChunkAccess> fillFromNoises(Blender blender, RandomState random, StructureSet structureSet, ChunkAccess chunk) {
+    public void spawnOriginalMobs(WorldGenRegion region) {}
+
+    @Override
+    public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState random, StructureManager structureManager, ChunkAccess chunk) {
         int chunkX = chunk.getPos().x;
         int chunkZ = chunk.getPos().z;
 
@@ -270,7 +275,9 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     public int getGenDepth() { return 16; }
 
     @Override
-    public void spawnOriginalMobs(LevelHeightAccessor heightAccessor) {}
+    public NoiseColumn getBaseColumn(int x, int z, LevelHeightAccessor heightAccessor, RandomState random) {
+        return null;
+    }
 
     @Override
     public int getBaseHeight(int x, int z, Heightmap.Types heightmap, LevelHeightAccessor world, RandomState noiseConfig) {
