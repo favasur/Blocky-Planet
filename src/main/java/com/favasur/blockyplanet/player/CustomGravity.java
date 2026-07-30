@@ -117,10 +117,12 @@ public final class CustomGravity {
     }
 
     /**
-     * Check if the given world is the Blocky Planet dimension.
-     * Compares the dimension's registry key against our dimension ID.
+     * Check if the given world is a Blocky Planet dimension.
+     * Delegates to the shared check in {@link BlockyPlanetMod} which handles
+     * both the custom dimension AND the overworld override (when Tellus is
+     * not loaded).
      */
     private static boolean isBlockyPlanetDimension(Level world) {
-        return world.dimension().location().equals(BlockyPlanetMod.DIMENSION_ID);
+        return BlockyPlanetMod.isBlockyPlanetDimension(world);
     }
 }
