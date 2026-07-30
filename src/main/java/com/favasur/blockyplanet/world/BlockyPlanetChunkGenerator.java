@@ -276,7 +276,9 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
     @Override
     public NoiseColumn getBaseColumn(int x, int z, LevelHeightAccessor heightAccessor, RandomState random) {
-        return null;
+        BlockState[] air = new BlockState[getGenDepth()];
+        for (int i = 0; i < air.length; i++) air[i] = Blocks.AIR.defaultBlockState();
+        return new NoiseColumn(0, air);
     }
 
     @Override
