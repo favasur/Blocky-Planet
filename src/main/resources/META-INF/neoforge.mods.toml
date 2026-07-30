@@ -1,0 +1,27 @@
+[mods]
+[[mods]]
+modId = "blocky_planet"
+version = "${mod_version}"
+displayName = "Blocky Planet"
+logoFile = "assets/blocky_planet/icon.png"
+credits = "BowerByte"
+authors = "BowerByte"
+description = "A spherical Minecraft world made of blocks — quad sphere, shell-based depth, radial gravity."
+license = "MIT"
+
+[[mods.mixinConfigs]]
+config = "blocky_planet.mixins.json"
+
+[[dependencies.blocky_planet]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.blocky_planet]]
+modId = "neoforge"
+type = "required"
+versionRange = "${loader_version_range}"
+ordering = "NONE"
+side = "BOTH"

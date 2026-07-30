@@ -3,13 +3,13 @@ package com.favasur.blockyplanet.mixin;
 import com.favasur.blockyplanet.BlockyPlanetMod;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import net.minecraft.block.BlockState;
-import net.minecraft.registry.Registry;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.world.World;
-import net.minecraft.world.biome.Biome;
-import net.minecraft.world.chunk.ChunkSection;
-import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -17,38 +17,37 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Mixin into {@link WorldChunk} to serve blocks from {@link PlanetBlockStorage}
+ * Mixin into {@link LevelChunk} to serve blocks from {@link PlanetBlockStorage}
  * to the vanilla renderer at ANY Y coordinate, not just Y=0..15.
  *
  * Without this mixin, blocks at Y > 15 are stored in PlanetBlockStorage but
  * never render because the vanilla section array only has 1 element
  * (since dimension height=16). The renderer calls getSection(yIndex) for
  * each section it wants to draw, and we intercept that to create
- * ChunkSection objects from our unbounded cube storage.
+ * LevelChunkSection objects from our unbounded cube storage.
  */
-@Mixin(WorldChunk.class)
+@Mixin(LevelChunk.class)
 public class MixinWorldChunk_CubicWorld {
 
     @Unique
-    private final Int2ObjectOpenHashMap<ChunkSection> blockyPlanet_sectionCache = new Int2ObjectOpenHashMap<>();
+    private final Int2ObjectOpenHashMap<LevelChunkSection> blockyPlanet_sectionCache = new Int2ObjectOpenHashMap<>();
 
     /**
-     * Intercept {@code WorldChunk.getSection(int)} to serve blocks from
+     * Intercept {@code LevelChunk.getSection(int)} to serve blocks from
      * PlanetBlockStorage for section indices outside the vanilla height.
      */
     @Inject(
-        method = "getSection(I)Lnet/minecraft/world/chunk/ChunkSection;",
+        method = "getSection(I)Lnet/minecraft/world/level/chunk/LevelChunkSection;",
         at = @At("HEAD"),
-        cancellable = true,
-        require = 0
+        cancellable = true
     )
-    private void blockyPlanet_getSection(int yIndex, CallbackInfoReturnable<ChunkSection> cir) {
-        WorldChunk self = (WorldChunk) (Object) this;
-        World world = self.getWorld();
+    private void blockyPlanet_getSection(int yIndex, CallbackInfoReturnable<LevelChunkSection> cir) {
+        LevelChunk self = (LevelChunk) (Object) this;
+        Level world = self.getLevel();
         if (!BlockyPlanetMod.isBlockyPlanetDimension(world)) return;
 
         // Check section cache first
-        ChunkSection cached = blockyPlanet_sectionCache.get(yIndex);
+        LevelChunkSection cached = blockyPlanet_sectionCache.get(yIndex);
         if (cached != null) {
             cir.setReturnValue(cached);
             return;
@@ -66,9 +65,9 @@ public class MixinWorldChunk_CubicWorld {
             return; // Let vanilla handle it (returns empty section)
         }
 
-        // Create a new ChunkSection populated from PlanetBlockStorage
-        Registry<Biome> biomeRegistry = world.getRegistryManager().get(RegistryKeys.BIOME);
-        ChunkSection section = new ChunkSection(biomeRegistry);
+        // Create a new LevelChunkSection populated from PlanetBlockStorage
+        Registry<Biome> biomeRegistry = world.registryAccess().lookupOrThrow(Registries.BIOME);
+        LevelChunkSection section = new LevelChunkSection(biomeRegistry);
 
         boolean hasBlocks = false;
         for (int dx = 0; dx < 16; dx++) {

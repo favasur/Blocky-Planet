@@ -1,7 +1,7 @@
 package com.favasur.blockyplanet.world;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
+import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * Replicates the vanilla Nether biome distribution and block palettes
@@ -103,9 +103,9 @@ public final class NetherBiomeHelper {
      */
     public static BlockState getBaseBlock(NetherBiome biome) {
         return switch (biome) {
-            case NETHER_WASTES, CRIMSON_FOREST, WARPED_FOREST -> Blocks.NETHERRACK.getDefaultState();
-            case SOUL_SAND_VALLEY -> Blocks.SOUL_SAND.getDefaultState();
-            case BASALT_DELTAS -> Blocks.BASALT.getDefaultState();
+            case NETHER_WASTES, CRIMSON_FOREST, WARPED_FOREST -> Blocks.NETHERRACK.defaultBlockState();
+            case SOUL_SAND_VALLEY -> Blocks.SOUL_SAND.defaultBlockState();
+            case BASALT_DELTAS -> Blocks.BASALT.defaultBlockState();
         };
     }
 
@@ -114,11 +114,11 @@ public final class NetherBiomeHelper {
      */
     public static BlockState getTopBlock(NetherBiome biome) {
         return switch (biome) {
-            case NETHER_WASTES      -> Blocks.NETHERRACK.getDefaultState();
-            case CRIMSON_FOREST     -> Blocks.CRIMSON_NYLIUM.getDefaultState();
-            case WARPED_FOREST      -> Blocks.WARPED_NYLIUM.getDefaultState();
-            case SOUL_SAND_VALLEY   -> Blocks.SOUL_SOIL.getDefaultState();
-            case BASALT_DELTAS      -> Blocks.BLACKSTONE.getDefaultState();
+            case NETHER_WASTES      -> Blocks.NETHERRACK.defaultBlockState();
+            case CRIMSON_FOREST     -> Blocks.CRIMSON_NYLIUM.defaultBlockState();
+            case WARPED_FOREST      -> Blocks.WARPED_NYLIUM.defaultBlockState();
+            case SOUL_SAND_VALLEY   -> Blocks.SOUL_SOIL.defaultBlockState();
+            case BASALT_DELTAS      -> Blocks.BLACKSTONE.defaultBlockState();
         };
     }
 
@@ -127,8 +127,8 @@ public final class NetherBiomeHelper {
      */
     public static BlockState getCeilingBlock(NetherBiome biome) {
         return switch (biome) {
-            case CRIMSON_FOREST -> Blocks.CRIMSON_NYLIUM.getDefaultState();
-            case WARPED_FOREST  -> Blocks.WARPED_NYLIUM.getDefaultState();
+            case CRIMSON_FOREST -> Blocks.CRIMSON_NYLIUM.defaultBlockState();
+            case WARPED_FOREST  -> Blocks.WARPED_NYLIUM.defaultBlockState();
             default             -> getBaseBlock(biome);
         };
     }
@@ -140,29 +140,29 @@ public final class NetherBiomeHelper {
     public static BlockState getDecorationBlock(NetherBiome biome, double noiseValue) {
         return switch (biome) {
             case NETHER_WASTES -> {
-                if (noiseValue > 0.85) yield Blocks.GRAVEL.getDefaultState();
-                if (noiseValue > 0.80) yield Blocks.GLOWSTONE.getDefaultState();
-                if (noiseValue < 0.10) yield Blocks.MAGMA_BLOCK.getDefaultState();
+                if (noiseValue > 0.85) yield Blocks.GRAVEL.defaultBlockState();
+                if (noiseValue > 0.80) yield Blocks.GLOWSTONE.defaultBlockState();
+                if (noiseValue < 0.10) yield Blocks.MAGMA_BLOCK.defaultBlockState();
                 yield null;
             }
             case CRIMSON_FOREST -> {
-                if (noiseValue > 0.80) yield Blocks.SHROOMLIGHT.getDefaultState();
-                if (noiseValue < 0.15) yield Blocks.NETHER_WART_BLOCK.getDefaultState();
+                if (noiseValue > 0.80) yield Blocks.SHROOMLIGHT.defaultBlockState();
+                if (noiseValue < 0.15) yield Blocks.NETHER_WART_BLOCK.defaultBlockState();
                 yield null;
             }
             case WARPED_FOREST -> {
-                if (noiseValue > 0.80) yield Blocks.SHROOMLIGHT.getDefaultState();
-                if (noiseValue < 0.15) yield Blocks.WARPED_WART_BLOCK.getDefaultState();
+                if (noiseValue > 0.80) yield Blocks.SHROOMLIGHT.defaultBlockState();
+                if (noiseValue < 0.15) yield Blocks.WARPED_WART_BLOCK.defaultBlockState();
                 yield null;
             }
             case SOUL_SAND_VALLEY -> {
-                if (noiseValue > 0.75) yield Blocks.SOUL_SOIL.getDefaultState();
-                if (noiseValue > 0.85) yield Blocks.BASALT.getDefaultState();
+                if (noiseValue > 0.75) yield Blocks.SOUL_SOIL.defaultBlockState();
+                if (noiseValue > 0.85) yield Blocks.BASALT.defaultBlockState();
                 yield null;
             }
             case BASALT_DELTAS -> {
-                if (noiseValue > 0.80) yield Blocks.MAGMA_BLOCK.getDefaultState();
-                if (noiseValue < 0.12) yield Blocks.GRAVEL.getDefaultState();
+                if (noiseValue > 0.80) yield Blocks.MAGMA_BLOCK.defaultBlockState();
+                if (noiseValue < 0.12) yield Blocks.GRAVEL.defaultBlockState();
                 yield null;
             }
         };

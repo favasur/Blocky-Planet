@@ -16,7 +16,7 @@ import java.util.List;
  *    depending on the edge pairing. Each of the 12 edge pairings has a specific
  *    transformation.
  *
- * Reference: https://www.bowerbyte.com/posts/blocky-planet/#whos-my-neighbor
+ * Reference: https://www.favasur.com/posts/blocky-planet/#whos-my-neighbor
  */
 public final class NeighborFinder {
 

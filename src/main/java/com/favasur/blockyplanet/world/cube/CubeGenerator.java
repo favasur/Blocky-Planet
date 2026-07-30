@@ -6,8 +6,8 @@ import com.favasur.blockyplanet.planet.QuadSphere;
 import com.favasur.blockyplanet.planet.Vector3d;
 import com.favasur.blockyplanet.world.FastNoiseLite;
 import com.favasur.blockyplanet.world.NetherBiomeHelper;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
+import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * Generates 16×16×16 cubes of block data for the quad-sphere planet.
@@ -118,7 +118,7 @@ public class CubeGenerator {
         if (depthBelowSurface < 0) {
             double waterRadius = planetRadius * 0.95;
             if (alignedDist <= waterRadius && alignedDist > QuadSphere.getShellInnerRadius(0)) {
-                return Blocks.WATER.getDefaultState();
+                return Blocks.WATER.defaultBlockState();
             }
             return null;
         }
@@ -129,15 +129,15 @@ public class CubeGenerator {
         boolean isArctic = isArcticRegion(alignedPos);
 
         if (depthBelowSurface <= 1.0) {
-            return isArctic ? Blocks.SNOW_BLOCK.getDefaultState() : Blocks.GRASS_BLOCK.getDefaultState();
+            return isArctic ? Blocks.SNOW_BLOCK.defaultBlockState() : Blocks.GRASS_BLOCK.defaultBlockState();
         } else if (depthBelowSurface <= 4.0) {
-            if (alignedDist <= planetRadius * 0.97) return Blocks.SAND.getDefaultState();
-            return isArctic ? Blocks.SNOW_BLOCK.getDefaultState() : Blocks.DIRT.getDefaultState();
+            if (alignedDist <= planetRadius * 0.97) return Blocks.SAND.defaultBlockState();
+            return isArctic ? Blocks.SNOW_BLOCK.defaultBlockState() : Blocks.DIRT.defaultBlockState();
         } else {
             if (BlockyPlanetConfig.isInNetherRing(alignedDist)) {
                 return getNetherBlock(alignedPos, alignedDist, planetRadius);
             }
-            return Blocks.STONE.getDefaultState();
+            return Blocks.STONE.defaultBlockState();
         }
     }
 
@@ -149,15 +149,15 @@ public class CubeGenerator {
         double surfaceRadius = getSurfaceRadius(new Vector3d(x, y, z));
         double depth = surfaceRadius - distFromCenter;
         if (depth < 0) return null;
-        if (depth <= 1.0) return Blocks.GRASS_BLOCK.getDefaultState();
+        if (depth <= 1.0) return Blocks.GRASS_BLOCK.defaultBlockState();
         if (depth <= 4.0) {
             double sandRadius = planetRadius * 0.97;
-            return distFromCenter <= sandRadius ? Blocks.SAND.getDefaultState() : Blocks.DIRT.getDefaultState();
+            return distFromCenter <= sandRadius ? Blocks.SAND.defaultBlockState() : Blocks.DIRT.defaultBlockState();
         }
         if (BlockyPlanetConfig.isInNetherRing(distFromCenter)) {
             return getNetherBlock(new Vector3d(x, y, z), distFromCenter, planetRadius);
         }
-        return Blocks.STONE.getDefaultState();
+        return Blocks.STONE.defaultBlockState();
     }
 
     private static BlockState getNetherBlock(Vector3d pos, double distFromCenter, double planetRadius) {
@@ -170,11 +170,11 @@ public class CubeGenerator {
         double thick  = outer - inner;
         double depth  = (distFromCenter - inner) / thick;
 
-        if (depth < 2.0 / thick || depth > 1.0 - 2.0 / thick) return Blocks.BEDROCK.getDefaultState();
+        if (depth < 2.0 / thick || depth > 1.0 - 2.0 / thick) return Blocks.BEDROCK.defaultBlockState();
         double caveThreshold = NetherBiomeHelper.isDenseBiome(biome) ? -0.1 : -0.4;
         if (noiseVal < caveThreshold) {
             double lavaThresh = NetherBiomeHelper.getLavaThreshold(biome);
-            return (depth < lavaThresh && noiseVal < -0.5) ? Blocks.LAVA.getDefaultState() : null;
+            return (depth < lavaThresh && noiseVal < -0.5) ? Blocks.LAVA.defaultBlockState() : null;
         }
 
         boolean nearCave = isNearCave(px, py, pz);
