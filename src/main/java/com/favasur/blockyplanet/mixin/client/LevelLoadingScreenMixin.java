@@ -16,14 +16,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Mixin into {@link LevelLoadingScreen#renderChunks} to render the
  * chunk generation progress grid as a CIRCLE instead of a square
- * when generating a Blocky Planet world (NeoForge/Mojmap).
+ * — same opaque visual style as vanilla, just clipped to a circle.
  */
 @Mixin(LevelLoadingScreen.class)
 public abstract class LevelLoadingScreenMixin {
 
-    /**
-     * Replace renderChunks with a circular version.
-     */
     @Inject(
         method = "renderChunks(Lnet/minecraft/client/gui/GuiGraphics;Lnet/minecraft/server/level/progress/StoringChunkProgressListener;IIII)V",
         at = @At("HEAD"),
@@ -34,27 +31,34 @@ public abstract class LevelLoadingScreenMixin {
                                                     int centerX, int centerY,
                                                     int pixelSize, int centerSizeDiv,
                                                     CallbackInfo ci) {
-        if (pixelSize == 0) return; // Border rendering — keep vanilla
+        if (pixelSize == 0) return; // Border rendering — skip
 
         ci.cancel();
 
-        int cellSize = pixelSize + centerSizeDiv; // Vanilla: pixelSize=2 → cellSize=2
+        int cellSize = pixelSize + centerSizeDiv; // 2px cells (matches vanilla)
         int fullDiameter = progressListener.getFullDiameter();
         int stepSize = progressListener.getDiameter();
         int visualFull = fullDiameter * stepSize;
 
         int xStart = centerX - visualFull / 2;
         int yStart = centerY - visualFull / 2;
-        float radiusSq = (fullDiameter / 2.0f) * (fullDiameter / 2.0f);
-        float halfFull = fullDiameter / 2.0f;
+        int xEnd = xStart + visualFull;
+        int yEnd = yStart + visualFull;
+
+        int radius = fullDiameter / 2;
+        int radiusSq = radius * radius;
+
+        // 1. Solid dark background for the full square area
+        guiGraphics.fill(xStart, yStart, xEnd, yEnd, 0x4F000000);
 
         Long2ObjectOpenHashMap<ChunkStatus> statuses =
             ((StoringChunkProgressListenerAccessor) progressListener).getStatuses();
 
+        // 2. Draw colored cells only within the circle
         for (int i = 0; i < fullDiameter; i++) {
             for (int j = 0; j < fullDiameter; j++) {
-                float dx = i - halfFull + 0.5f;
-                float dz = j - halfFull + 0.5f;
+                int dx = i - radius;
+                int dz = j - radius;
                 if (dx * dx + dz * dz > radiusSq) continue;
 
                 ChunkStatus status = statuses.get(ChunkPos.asLong(i, j));
@@ -64,11 +68,35 @@ public abstract class LevelLoadingScreenMixin {
                                  getStatusColor(status));
             }
         }
+
+        // 3. Draw a visible circular border (2px thick)
+        int borderColor = 0xFF4444AA;
+        int borderR = radius * stepSize + stepSize / 2; // edge of the grid
+
+        // Outer ring (r+1)
+        for (int px = -borderR - 1; px <= borderR + 1; px++) {
+            int py = (int) Math.round(Math.sqrt((borderR + 1) * (borderR + 1) - px * px));
+            int cx = centerX + px;
+            int cy = centerY + py;
+            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
+                guiGraphics.fill(cx, cy, cx + 1, cy + 1, borderColor);
+            cy = centerY - py;
+            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
+                guiGraphics.fill(cx, cy, cx + 1, cy + 1, borderColor);
+        }
+        // Inner ring (r)
+        for (int px = -borderR; px <= borderR; px++) {
+            int py = (int) Math.round(Math.sqrt(borderR * borderR - px * px));
+            int cx = centerX + px;
+            int cy = centerY + py;
+            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
+                guiGraphics.fill(cx, cy, cx + 1, cy + 1, borderColor);
+            cy = centerY - py;
+            if (cx >= xStart && cx < xEnd && cy >= yStart && cy < yEnd)
+                guiGraphics.fill(cx, cy, cx + 1, cy + 1, borderColor);
+        }
     }
 
-    /**
-     * Map ChunkStatus to its display color (matching vanilla's STATUS_TO_COLOR map).
-     */
     @Unique
     private static int getStatusColor(ChunkStatus status) {
         if (status == ChunkStatus.EMPTY) return 0xFF555555;
