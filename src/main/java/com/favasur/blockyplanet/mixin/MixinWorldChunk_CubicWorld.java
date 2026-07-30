@@ -117,30 +117,30 @@ public class MixinWorldChunk_CubicWorld {
         int chunkZ = self.getPos().z;
         int baseY = yIndex << 4;
 
-        if (!storage.hasAnyInSection(chunkX, yIndex, chunkZ)) {
-            return;
-        }
-
         Registry<Biome> biomeReg = world.registryAccess().registryOrThrow(Registries.BIOME);
         LevelChunkSection section = new LevelChunkSection(biomeReg);
 
         boolean hasBlocks = false;
-        for (int dx = 0; dx < 16; dx++) {
-            for (int dz = 0; dz < 16; dz++) {
-                for (int dy = 0; dy < 16; dy++) {
-                    BlockState state = storage.getBlockState(
-                        chunkX * 16 + dx, baseY + dy, chunkZ * 16 + dz);
-                    if (!state.isAir()) {
-                        section.setBlockState(dx, dy, dz, state, false);
-                        hasBlocks = true;
+        if (storage.hasAnyInSection(chunkX, yIndex, chunkZ)) {
+            for (int dx = 0; dx < 16; dx++) {
+                for (int dz = 0; dz < 16; dz++) {
+                    for (int dy = 0; dy < 16; dy++) {
+                        BlockState state = storage.getBlockState(
+                            chunkX * 16 + dx, baseY + dy, chunkZ * 16 + dz);
+                        if (!state.isAir()) {
+                            section.setBlockState(dx, dy, dz, state, false);
+                            hasBlocks = true;
+                        }
                     }
                 }
             }
         }
 
-        if (hasBlocks) {
-            blockyPlanet_sectionCache.put(yIndex, section);
-            cir.setReturnValue(section);
-        }
+        // Always cache and return the section, even if empty.
+        // Falling through to vanilla getSection would throw
+        // ArrayIndexOutOfBoundsException for yIndex outside the
+        // vanilla section array bounds.
+        blockyPlanet_sectionCache.put(yIndex, section);
+        cir.setReturnValue(section);
     }
 }
