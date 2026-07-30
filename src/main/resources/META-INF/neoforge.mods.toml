@@ -9,6 +9,9 @@ authors = "BowerByte"
 description = "A spherical Minecraft world made of blocks — quad sphere, shell-based depth, radial gravity."
 license = "MIT"
 
+[[mods.mixinConfigs]]
+config = "blocky_planet.mixins.json"
+
 [[dependencies.blocky_planet]]
 modId = "minecraft"
 type = "required"
