@@ -56,6 +56,7 @@ public class MixinWorldChunk_CubicWorld {
     private static final int VERTICAL_RANGE = 512;
 
     /** Invalidate the virtual array cache for a specific chunk. */
+    @Unique
     public static void invalidate(Chunk chunk) {
         blockyPlanet_virtualCache.remove(chunk);
     }
