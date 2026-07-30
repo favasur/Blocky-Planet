@@ -11,7 +11,8 @@
     "ScreenAccessor"
   ],
   "client": [
-    "client.WorldRendererMixin"
+    "client.WorldRendererMixin",
+    "client.ChunkDebugRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
