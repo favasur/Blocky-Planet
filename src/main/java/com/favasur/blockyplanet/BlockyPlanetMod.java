@@ -66,23 +66,13 @@ public class BlockyPlanetMod implements ModInitializer {
             BlockyPlanetChunkGenerator.CODEC
         );
 
-        // Capture the overworld and set spawn position on server start
+        // Capture the overworld reference on server start
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             for (ServerWorld sw : server.getWorlds()) {
                 if (!isBlockyPlanetDimension(sw)) continue;
 
                 blockyWorld = sw;
                 LOGGER.info("Blocky Planet world: {}", sw.getRegistryKey().getValue());
-
-                // Set the world spawn position at the planet surface.
-                // The MixinHeightLimitView makes isOutOfHeightLimit return false
-                // for any Y value, so setSpawnPos can place the player at the
-                // correct surface height regardless of DimensionType.logicalHeight().
-                double pr = QuadSphere.planetRadius();
-                int surfaceY = (int) Math.round(pr) + 16;
-                BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
-                sw.setSpawnPos(spawnPos, 0);
-                LOGGER.info("Set world spawn to {}", spawnPos);
 
                 // Capture Tellus overworld reference for surface block reading
                 if (TELLUS_LOADED) {
@@ -97,6 +87,24 @@ public class BlockyPlanetMod implements ModInitializer {
                 break;
             }
         });
+
+        // ═══ Teleport players to planet surface on join ═══
+        // setSpawnPos fails at extreme Y values because the DimensionType's
+        // logicalHeight (384 for overworld) clamps the player's initial position
+        // to the build range during login, regardless of isOutOfHeightLimit mixins.
+        // Direct teleport bypasses this and correctly places the player at the
+        // surface.  This now works because the getSection ArrayIndexOutOfBounds
+        // bug in MixinWorldChunk_CubicWorld has been fixed.
+        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register(
+            (handler, sender, server) -> {
+                net.minecraft.server.network.ServerPlayerEntity player = handler.getPlayer();
+                if (!isBlockyPlanetDimension(player.getServerWorld())) return;
+                double pr = QuadSphere.planetRadius();
+                int surfaceY = (int) Math.round(pr) + 16;
+                player.teleport(player.getServerWorld(), 0.5, surfaceY, 0.5,
+                    java.util.Set.of(), 0.0f, 0.0f);
+                LOGGER.info("Teleported player to planet surface at Y={}", surfaceY);
+            });
 
         if (TELLUS_LOADED) {
             LOGGER.info("Tellus detected — planet surface reads Tellus terrain from overworld via projection.");
