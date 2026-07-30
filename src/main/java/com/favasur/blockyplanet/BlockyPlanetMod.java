@@ -25,7 +25,6 @@ public class BlockyPlanetMod implements ModInitializer {
     public static final String MOD_ID = "blocky_planet";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-    public static final Identifier DIMENSION_ID = Identifier.of(MOD_ID, "blocky_planet");
     public static final Identifier CHUNK_GENERATOR_ID = Identifier.of(MOD_ID, "blocky_planet_generator");
 
     /** Whether Tellus (real Earth terrain) is loaded alongside us. */
@@ -67,55 +66,37 @@ public class BlockyPlanetMod implements ModInitializer {
             BlockyPlanetChunkGenerator.CODEC
         );
 
-        // Capture world references when the server starts
+        // Capture the overworld and set spawn position on server start
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             for (ServerWorld sw : server.getWorlds()) {
-                // Capture Tellus overworld reference (used for surface block reading)
-                if (TELLUS_LOADED && sw.getRegistryKey().equals(World.OVERWORLD)) {
-                    tellusOverworld = sw;
-                    LOGGER.info("Captured Tellus overworld reference");
-                }
-                // Capture our custom dimension
-                if (isCustomDimension(sw)) {
-                    blockyWorld = sw;
-                    LOGGER.info("Captured Blocky Planet custom dimension: {}", sw.getRegistryKey().getValue());
-                }
-            }
-            // Fall back to overworld if no custom dimension found
-            if (blockyWorld == null) {
-                for (ServerWorld sw : server.getWorlds()) {
-                    if (isBlockyPlanetDimension(sw)) {
-                        blockyWorld = sw;
-                        LOGGER.info("Captured planet world: {}", sw.getRegistryKey().getValue());
-                        break;
+                if (!isBlockyPlanetDimension(sw)) continue;
+
+                blockyWorld = sw;
+                LOGGER.info("Blocky Planet world: {}", sw.getRegistryKey().getValue());
+
+                // Set the world spawn position at the planet surface.
+                // The MixinHeightLimitView makes isOutOfHeightLimit return false
+                // for any Y value, so setSpawnPos can place the player at the
+                // correct surface height regardless of DimensionType.logicalHeight().
+                double pr = QuadSphere.planetRadius();
+                int surfaceY = (int) Math.round(pr) + 16;
+                BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
+                sw.setSpawnPos(spawnPos, 0);
+                LOGGER.info("Set world spawn to {}", spawnPos);
+
+                // Capture Tellus overworld reference for surface block reading
+                if (TELLUS_LOADED) {
+                    for (ServerWorld overworld : server.getWorlds()) {
+                        if (overworld.getRegistryKey().equals(World.OVERWORLD)) {
+                            tellusOverworld = overworld;
+                            LOGGER.info("Captured Tellus overworld reference");
+                            break;
+                        }
                     }
                 }
+                break;
             }
-
         });
-
-        // ═══ Teleport players to planet surface on join ═══
-        // Replaces setSpawnPos which fails at extreme Y values because
-        // DimensionType.logicalHeight() = 384 rejects positions above it
-        // even with height-limit mixins. Direct teleport bypasses this.
-        //
-        // IMPORTANT: server.execute() defers the teleport by one tick so it
-        // runs AFTER the full login handshake. Without this delay the client
-        // receives both the initial spawn and the teleport simultaneously,
-        // triggering "You logged in from another location" disconnect.
-        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register(
-            (handler, sender, server) -> {
-                net.minecraft.server.network.ServerPlayerEntity player = handler.getPlayer();
-                if (!isBlockyPlanetDimension(player.getServerWorld())) return;
-                server.execute(() -> teleportToSurface(player));
-            });
-
-        // ═══ Also handle respawn (JOIN only fires on initial connection) ═══
-        net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents.AFTER_RESPAWN.register(
-            (oldPlayer, newPlayer, alive) -> {
-                if (!isBlockyPlanetDimension(newPlayer.getServerWorld())) return;
-                teleportToSurface(newPlayer);
-            });
 
         if (TELLUS_LOADED) {
             LOGGER.info("Tellus detected — planet surface reads Tellus terrain from overworld via projection.");
@@ -131,38 +112,16 @@ public class BlockyPlanetMod implements ModInitializer {
     /**
      * Returns true if this world uses our spherical Blocky Planet chunk generator.
      *
-     * When Tellus is loaded, the overworld uses Tellus's generator (not ours),
-     * so we only check our custom dimension ID here. The chunk generator's
-     * surface reader will project sphere coordinates to overworld coordinates
-     * and read Tellus blocks from {@link #tellusOverworld}.
+     * The planet IS the overworld — we replace the overworld dimension with our
+     * chunk generator via the dimension override JSON. No custom dimension needed.
+     * When Tellus is loaded, the overworld uses Tellus's generator, so we return
+     * false in that case (Tellus controls overworld generation).
      */
     public static boolean isBlockyPlanetDimension(World world) {
         if (world == null) return false;
-        Identifier id = world.getRegistryKey().getValue();
-        if (id.equals(DIMENSION_ID)) return true;
-        // Only include overworld if Tellus is NOT loaded (otherwise Tellus controls overworld)
-        if (!TELLUS_LOADED && id.equals(Identifier.ofVanilla("overworld"))) return true;
+        // Only the overworld uses our generator (when Tellus is not loaded)
+        if (!TELLUS_LOADED && world.getRegistryKey().getValue().equals(Identifier.ofVanilla("overworld"))) return true;
         return false;
-    }
-
-    /**
-     * Returns true only for the dedicated Blocky Planet dimension (not overworld override).
-     * Used by server startup to find the custom dimension preferentially.
-     */
-    private static boolean isCustomDimension(World world) {
-        return world != null && world.getRegistryKey().getValue().equals(DIMENSION_ID);
-    }
-
-    /**
-     * Teleport a player to the planet surface, bypassing logical-height
-     * checks that would reject extreme Y values.
-     */
-    private static void teleportToSurface(net.minecraft.server.network.ServerPlayerEntity player) {
-        double pr = QuadSphere.planetRadius();
-        int surfaceY = (int) Math.round(pr) + 16;
-        player.teleport(player.getServerWorld(), 0.5, surfaceY, 0.5,
-            java.util.Set.of(), 0.0f, 0.0f);
-        LOGGER.info("Teleported player to planet surface at Y={}", surfaceY);
     }
 
     /**
