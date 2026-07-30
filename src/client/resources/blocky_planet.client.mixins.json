@@ -4,7 +4,8 @@
   "package": "com.favasur.blockyplanet.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "WorldRendererMixin"
+    "WorldRendererMixin",
+    "ChunkLoadingDebugRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
