@@ -8,17 +8,17 @@
     "BowerByte"
   ],
   "contact": {
-    "homepage": "https://bowerbyte.com/posts/blocky-planet/"
+    "homepage": "https://favasur.com/posts/blocky-planet/"
   },
   "license": "MIT",
   "icon": "assets/blocky_planet/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
-      "com.bowerbyte.blockyplanet.BlockyPlanetMod"
+      "com.favasur.blockyplanet.BlockyPlanetMod"
     ],
     "client": [
-      "com.bowerbyte.blockyplanet.BlockyPlanetModClient"
+      "com.favasur.blockyplanet.BlockyPlanetModClient"
     ]
   },
   "mixins": [
