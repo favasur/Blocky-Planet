@@ -92,17 +92,25 @@ public class BlockyPlanetMod implements ModInitializer {
                 }
             }
 
-            // ═══ Set spawn position at planet surface ═══
-            ServerWorld planetWorld = (ServerWorld) blockyWorld;
-            if (planetWorld != null) {
-                double pr = QuadSphere.planetRadius();
-                // Account for terrain noise (amplitude ±12) plus buffer
-                int surfaceY = (int) Math.round(pr) + 12 + 3; // radius + noise_amplitude + safety margin
-                BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
-                planetWorld.setSpawnPos(spawnPos, 0);
-                LOGGER.info("Set planet spawn to {}", spawnPos);
-            }
         });
+
+        // ═══ Teleport players to planet surface on join ═══
+        // Replaces setSpawnPos which fails at extreme Y values because
+        // DimensionType.logicalHeight() = 384 rejects positions above it
+        // even with height-limit mixins. Direct teleport bypasses this.
+        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register(
+            (handler, sender, server) -> {
+                net.minecraft.server.network.ServerPlayerEntity player = handler.getPlayer();
+                if (!isBlockyPlanetDimension(player.getServerWorld())) return;
+                teleportToSurface(player);
+            });
+
+        // ═══ Also handle respawn (JOIN only fires on initial connection) ═══
+        net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents.AFTER_RESPAWN.register(
+            (oldPlayer, newPlayer, alive) -> {
+                if (!isBlockyPlanetDimension(newPlayer.getServerWorld())) return;
+                teleportToSurface(newPlayer);
+            });
 
         if (TELLUS_LOADED) {
             LOGGER.info("Tellus detected — planet surface reads Tellus terrain from overworld via projection.");
@@ -138,6 +146,18 @@ public class BlockyPlanetMod implements ModInitializer {
      */
     private static boolean isCustomDimension(World world) {
         return world != null && world.getRegistryKey().getValue().equals(DIMENSION_ID);
+    }
+
+    /**
+     * Teleport a player to the planet surface, bypassing logical-height
+     * checks that would reject extreme Y values.
+     */
+    private static void teleportToSurface(net.minecraft.server.network.ServerPlayerEntity player) {
+        double pr = QuadSphere.planetRadius();
+        int surfaceY = (int) Math.round(pr) + 16;
+        player.teleport(player.getServerWorld(), 0.5, surfaceY, 0.5,
+            java.util.Set.of(), 0.0f, 0.0f);
+        LOGGER.info("Teleported player to planet surface at Y={}", surfaceY);
     }
 
     /**
