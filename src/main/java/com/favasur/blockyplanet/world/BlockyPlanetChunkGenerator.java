@@ -20,10 +20,12 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
 
 import java.util.List;
@@ -291,10 +293,16 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     }
 
     /**
-     * Read a surface block from the Tellus overworld via equirectangular projection.
-     * Projects the planet's spherical position to flat overworld coordinates,
-     * reads the Tellus-generated biome at that position, and returns the
-     * appropriate surface block for that biome.
+     * Read the ACTUAL surface block from the Tellus overworld via equirectangular
+     * projection. Projects the planet's spherical position to flat overworld
+     * coordinates, reads the topmost non-air block at that position from
+     * the Tellus-generated chunk, and returns it directly.
+     *
+     * This gives the player Tellus's actual Earth terrain blocks (grass,
+     * stone, sand, etc.) wrapped around the spherical planet.
+     *
+     * Falls back to our biome-mapped surface on any error (chunk not loaded,
+     * Tellus not available, etc.).
      */
     private BlockState getTellusSurfaceBlock(Vector3d alignedPos) {
         try {
@@ -317,23 +325,34 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
             int ox = (int) Math.round(lon * scale);
             int oz = (int) Math.round(lat * scale);
 
-            // Sample the Tellus overworld biome at the projected position (Y=0)
-            Biome tellusBiome = overworld.getBiome(new BlockPos(ox, 0, oz)).value();
-            if (tellusBiome == null) return null;
-
-            // Check if underwater in the Tellus overworld
-            int overworldSurfaceY = overworld.getHeight(Heightmap.Types.WORLD_SURFACE, ox, oz);
-            if (overworldSurfaceY <= overworld.getSeaLevel()) {
-                String tPath = getBiomePath(tellusBiome);
-                if (tPath.contains("deep") || tPath.contains("ocean")) {
-                    return Blocks.GRAVEL.defaultBlockState();
-                }
-                return Blocks.SAND.defaultBlockState();
+            // Check if the Tellus chunk is loaded — if not, skip to avoid
+            // forcing chunk loads from a worker thread.
+            int chunkX = ox >> 4;
+            int chunkZ = oz >> 4;
+            if (!overworld.hasChunk(chunkX, chunkZ)) {
+                return null;
             }
 
-            return getBiomeSurfaceBlock(tellusBiome);
+            // Get the chunk and read the topmost non-air surface block
+            LevelChunk tellusChunk = overworld.getChunk(chunkX, chunkZ);
+            int topY = tellusChunk.getHeight(Heightmap.Types.WORLD_SURFACE, ox, oz);
+            BlockPos surfacePos = new BlockPos(ox, topY, oz);
+            BlockState tellusBlock = overworld.getBlockState(surfacePos);
+
+            // If we got a valid non-air block, use it directly
+            if (tellusBlock != null && !tellusBlock.isAir() && tellusBlock.getBlock() != net.minecraft.world.level.block.Blocks.VOID_AIR) {
+                return tellusBlock;
+            }
+
+            // Fallback: use the Tellus biome to determine surface block type
+            Biome tellusBiome = overworld.getBiome(surfacePos).value();
+            if (tellusBiome != null) {
+                return getBiomeSurfaceBlock(tellusBiome);
+            }
+
+            return null;
         } catch (Exception e) {
-            return null; // Silently fall back
+            return null; // Silently fall back to our generation
         }
     }
 
