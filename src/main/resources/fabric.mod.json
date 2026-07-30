@@ -21,6 +21,7 @@
       "com.favasur.blockyplanet.BlockyPlanetModClient"
     ]
   },
+  "accessWidener": "blocky_planet.accesswidener",
   "mixins": [
     "blocky_planet.mixins.json"
   ],
