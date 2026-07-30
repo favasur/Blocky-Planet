@@ -1,6 +1,7 @@
 package com.favasur.blockyplanet.mixin;
 
 import com.favasur.blockyplanet.BlockyPlanetMod;
+import com.favasur.blockyplanet.planet.QuadSphere;
 import com.favasur.blockyplanet.world.cube.PlanetBlockStorage;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minecraft.block.BlockState;
@@ -17,62 +18,145 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
+
 /**
- * Mixin into {@link Chunk} to serve blocks from {@link PlanetBlockStorage}
- * to the vanilla renderer at ANY Y coordinate, not just Y=0..15.
+ * Mixin into {@link Chunk} to extend the vanilla section array so the
+ * renderer can see blocks at the planet surface Y level.
  *
- * Without this mixin, blocks at Y > 15 are stored in PlanetBlockStorage but
- * never render because the vanilla section array only has 1 element
- * (since dimension height=16). The renderer calls getSection(yIndex) for
- * each section it wants to draw, and we intercept that to create
- * ChunkSection objects from our unbounded cube storage.
+ * PROBLEM:
+ * The dimension type has min_y=0, height=16 → 1 section (Y=0..15).
+ * Planet surface at Y=planetRadius (e.g. Y=7,000 for 14 km) is invisible.
  *
- * Targets {@link Chunk} instead of {@link WorldChunk} because
- * {@code getSection(int)} is declared on the abstract {@link Chunk} class,
- * and {@link WorldChunk} inherits it. Mixin cannot find inherited methods
- * when targeting the subclass.
+ * FIX:
+ * Override getSectionArray() to return a virtual array sized up to the
+ * planet surface section index (capped at 8192). Populate from
+ * PlanetBlockStorage. Cache in a static WeakHashMap keyed by Chunk
+ * so other mixins (MixinWorldChunk_UnloadCleanup) can invalidate.
  */
 @Mixin(Chunk.class)
 public class MixinWorldChunk_CubicWorld {
 
+    /** Global cache: virtual section arrays keyed by Chunk identity. */
+    @Unique
+    private static final Map<Chunk, ChunkSection[]> blockyPlanet_virtualCache =
+        Collections.synchronizedMap(new WeakHashMap<>());
+
+    /** Per-section cache for the getSection(int) fallback. */
     @Unique
     private final Int2ObjectOpenHashMap<ChunkSection> blockyPlanet_sectionCache = new Int2ObjectOpenHashMap<>();
 
+    /** Invalidate the virtual array cache for a specific chunk. */
+    public static void invalidate(Chunk chunk) {
+        blockyPlanet_virtualCache.remove(chunk);
+    }
+
     /**
-     * Intercept {@code WorldChunk.getSection(int)} to serve blocks from
-     * PlanetBlockStorage for section indices outside the vanilla height.
+     * Override getSectionArray() to return a virtual section array that
+     * includes sections up to the planet surface Y level.
+     */
+    @Inject(
+        method = "getSectionArray()[Lnet/minecraft/world/chunk/ChunkSection;",
+        at = @At("RETURN"),
+        cancellable = true
+    )
+    private void blockyPlanet_getSectionArray(CallbackInfoReturnable<ChunkSection[]> cir) {
+        if (!((Object) this instanceof WorldChunk self)) return;
+        World world = self.getWorld();
+        if (!BlockyPlanetMod.isBlockyPlanetDimension(world)) return;
+
+        Chunk chunk = (Chunk) (Object) this;
+
+        // Check global cache
+        ChunkSection[] cached = blockyPlanet_virtualCache.get(chunk);
+        if (cached != null) {
+            cir.setReturnValue(cached);
+            return;
+        }
+
+        ChunkSection[] original = cir.getReturnValue();
+        double r = QuadSphere.planetRadius();
+        int surfaceIdx = (int) Math.ceil(r / 16.0);
+
+        // Cap at 8192 sections (~131 km radius) to prevent excessive memory
+        int maxIdx = Math.min(surfaceIdx, 8191);
+        if (maxIdx < original.length) return; // Already covered
+
+        // Build virtual array
+        ChunkSection[] virtual = new ChunkSection[maxIdx + 1];
+        System.arraycopy(original, 0, virtual, 0, original.length);
+
+        // Fill higher sections from PlanetBlockStorage or empty
+        PlanetBlockStorage storage = BlockyPlanetMod.getOrCreateStorage(world);
+        int chunkX = self.getPos().x;
+        int chunkZ = self.getPos().z;
+        Registry<Biome> biomeReg = world.getRegistryManager().get(RegistryKeys.BIOME);
+
+        for (int i = original.length; i <= maxIdx; i++) {
+            int cubeY = i; // section index == cubeY (both Y÷16)
+            int baseY = i << 4;
+
+            if (storage.hasAnyInSection(chunkX, cubeY, chunkZ)) {
+                ChunkSection sec = new ChunkSection(biomeReg);
+                boolean hasBlocks = false;
+                for (int dx = 0; dx < 16; dx++) {
+                    for (int dz = 0; dz < 16; dz++) {
+                        for (int dy = 0; dy < 16; dy++) {
+                            BlockState state = storage.getBlockState(
+                                chunkX * 16 + dx, baseY + dy, chunkZ * 16 + dz);
+                            if (!state.isAir()) {
+                                sec.setBlockState(dx, dy, dz, state, false);
+                                hasBlocks = true;
+                            }
+                        }
+                    }
+                }
+                if (hasBlocks) {
+                    virtual[i] = sec;
+                    continue;
+                }
+            }
+            // Fill with empty section to avoid null sections
+            virtual[i] = new ChunkSection(biomeReg);
+        }
+
+        blockyPlanet_virtualCache.put(chunk, virtual);
+        cir.setReturnValue(virtual);
+    }
+
+    /**
+     * Intercept getSection(int) as fallback for code that requests
+     * individual sections outside the normal range.
      */
     @Inject(
         method = "getSection(I)Lnet/minecraft/world/chunk/ChunkSection;",
         at = @At("HEAD"),
-        cancellable = true,
-        require = 0
+        cancellable = true
     )
     private void blockyPlanet_getSection(int yIndex, CallbackInfoReturnable<ChunkSection> cir) {
         if (!((Object) this instanceof WorldChunk self)) return;
         World world = self.getWorld();
         if (!BlockyPlanetMod.isBlockyPlanetDimension(world)) return;
 
-        // Check section cache first
+        // Check per-section cache
         ChunkSection cached = blockyPlanet_sectionCache.get(yIndex);
         if (cached != null) {
             cir.setReturnValue(cached);
             return;
         }
 
-        // Check if PlanetBlockStorage has any blocks for this section
+        // Check PlanetBlockStorage
         PlanetBlockStorage storage = BlockyPlanetMod.getOrCreateStorage(world);
         int chunkX = self.getPos().x;
         int chunkZ = self.getPos().z;
         int baseY = yIndex << 4;
 
-        // Quick check: does the storage have any cubes in this section's Y range?
-        int cubeY = baseY >> 4;
-        if (!storage.hasAnyInSection(chunkX, cubeY, chunkZ)) {
-            return; // Let vanilla handle it (returns empty section)
+        if (!storage.hasAnyInSection(chunkX, yIndex, chunkZ)) {
+            return; // Let vanilla handle it
         }
 
-        // Create a new ChunkSection populated from PlanetBlockStorage
         Registry<Biome> biomeRegistry = world.getRegistryManager().get(RegistryKeys.BIOME);
         ChunkSection section = new ChunkSection(biomeRegistry);
 
@@ -81,11 +165,8 @@ public class MixinWorldChunk_CubicWorld {
             for (int dz = 0; dz < 16; dz++) {
                 for (int dy = 0; dy < 16; dy++) {
                     BlockState state = storage.getBlockState(
-                        chunkX * 16 + dx,
-                        baseY + dy,
-                        chunkZ * 16 + dz
-                    );
-                    if (state != null && !state.isAir()) {
+                        chunkX * 16 + dx, baseY + dy, chunkZ * 16 + dz);
+                    if (!state.isAir()) {
                         section.setBlockState(dx, dy, dz, state, false);
                         hasBlocks = true;
                     }
@@ -97,8 +178,5 @@ public class MixinWorldChunk_CubicWorld {
             blockyPlanet_sectionCache.put(yIndex, section);
             cir.setReturnValue(section);
         }
-        // If no blocks in this section, fall through to vanilla (empty section)
     }
-
-
 }
