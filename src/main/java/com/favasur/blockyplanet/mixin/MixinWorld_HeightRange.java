@@ -2,7 +2,7 @@ package com.favasur.blockyplanet.mixin;
 
 import com.favasur.blockyplanet.BlockyPlanetMod;
 import com.favasur.blockyplanet.planet.QuadSphere;
-import net.minecraft.world.HeightLimitView;
+import net.minecraft.util.Identifier;
 import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -10,56 +10,47 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Mixin into {@link HeightLimitView} to override {@code getHeight()} and
+ * Mixin into {@link World} to override {@code getHeight()} and
  * {@code getBottomY()} for the Blocky Planet dimension.
+ *
+ * Uses {@code @Inject(cancellable=true)} rather than {@code @Overwrite}
+ * because the vanilla fallback logic is preserved when we don't cancel.
+ * The compile-time warnings from Mixin's annotation processor are benign —
+ * at runtime the ASM-based method resolver finds inherited interface
+ * methods implemented on the concrete class.
  *
  * The vanilla overworld dimension type has {@code height = 384} and
  * {@code min_y = -64}, giving a range of -64 to 320.  Our planet surface
  * is at Y ≈ planetRadius (e.g. 7,015 for a 14 km planet), far outside
- * this range.  Vanilla feature placement, lighting, and other systems
- * use the world's HeightLimitView to clamp Y positions — they reject
- * positions outside the range, which causes "Empty height range" warnings
- * and prevents chunks from reaching the DONE status, freezing world creation.
+ * this range.  Feature placement, lighting, and other systems use these
+ * methods to clamp Y positions — positions outside the range cause
+ * "Empty height range" warnings and prevent chunks from completing.
  *
- * By overriding getHeight() and getBottomY() to cover the full planet
- * diameter, all game systems see a valid height range that includes the
- * planet surface.  The sparse section array in
- * {@link com.favasur.blockyplanet.mixin.MixinWorldChunk_CubicWorld}
- * prevents excessive memory allocation.
+ * The sparse section array in MixinWorldChunk_CubicWorld prevents
+ * excessive memory allocation despite the enlarged height range.
  */
-@Mixin(HeightLimitView.class)
-public interface MixinWorld_HeightRange {
+@Mixin(World.class)
+public abstract class MixinWorld_HeightRange {
 
-    /**
-     * Override {@code getHeight()} to return the full planet diameter.
-     * Vanilla returns 384 (logicalHeight from overworld dimension type),
-     * which is far too small for our planet surface at Y≈7,015.
-     */
     @Inject(
-        method = "getHeight",
+        method = "getHeight()I",
         at = @At("HEAD"),
         cancellable = true
     )
-    default void blockyPlanet_getHeight(CallbackInfoReturnable<Integer> cir) {
-        if (!((Object) this instanceof World world)) return;
-        if (!BlockyPlanetMod.isBlockyPlanetDimension(world)) return;
-        double planetR = QuadSphere.planetRadius();
-        cir.setReturnValue((int) (planetR * 2 + 256));
+    public void blockyPlanet_getHeight(CallbackInfoReturnable<Integer> cir) {
+        World self = (World) (Object) this;
+        if (!BlockyPlanetMod.isBlockyPlanetDimension(self)) return;
+        cir.setReturnValue((int) (QuadSphere.planetRadius() * 2 + 256));
     }
 
-    /**
-     * Override {@code getBottomY()} to place the world bottom below the
-     * planet core.  Vanilla returns -64 (overworld dimension type min_y).
-     */
     @Inject(
-        method = "getBottomY",
+        method = "getBottomY()I",
         at = @At("HEAD"),
         cancellable = true
     )
-    default void blockyPlanet_getBottomY(CallbackInfoReturnable<Integer> cir) {
-        if (!((Object) this instanceof World world)) return;
-        if (!BlockyPlanetMod.isBlockyPlanetDimension(world)) return;
-        double planetR = QuadSphere.planetRadius();
-        cir.setReturnValue(-(int) planetR - 128);
+    public void blockyPlanet_getBottomY(CallbackInfoReturnable<Integer> cir) {
+        World self = (World) (Object) this;
+        if (!BlockyPlanetMod.isBlockyPlanetDimension(self)) return;
+        cir.setReturnValue(-(int) QuadSphere.planetRadius() - 128);
     }
 }
