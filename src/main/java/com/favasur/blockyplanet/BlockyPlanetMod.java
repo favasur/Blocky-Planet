@@ -66,6 +66,7 @@ public class BlockyPlanetMod {
         );
 
         NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onServerStarted);
+        NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onPlayerJoinLevel);
 
         BlockyPlanetModClient.init();
         NeoForge.EVENT_BUS.addListener(BlockyPlanetModClient::onScreenInit);
@@ -110,15 +111,24 @@ public class BlockyPlanetMod {
             }
         }
 
-        // ═══ Set spawn position at planet surface ═══
-        if (blockyWorld instanceof ServerLevel planetWorld) {
-            double pr = QuadSphere.planetRadius();
-            // Account for terrain noise (amplitude ±12) plus buffer
-            int surfaceY = (int) Math.round(pr) + 12 + 3;
-            BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
-            planetWorld.setDefaultSpawnPos(spawnPos, 0);
-            BlockyPlanetMod.LOGGER.info("Set planet spawn to {}", spawnPos);
-        }
+    }
+
+    /**
+     * Teleport players to the planet surface when they join.
+     * Replaces setDefaultSpawnPos which fails at extreme Y values
+     * due to DimensionType logical height limits.
+     */
+    public static void onPlayerJoinLevel(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event) {
+        if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return;
+        Level world = event.getLevel();
+        if (!isBlockyPlanetDimension(world)) return;
+
+        double pr = QuadSphere.planetRadius();
+        int surfaceY = (int) Math.round(pr) + 16;
+        BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
+        player.teleportTo((ServerLevel) world, 0.5, surfaceY, 0.5,
+            java.util.Set.of(), 0.0f, 0.0f);
+        LOGGER.info("Teleported player to planet surface at {}", spawnPos);
     }
 
     private static boolean isCustomDimension(Level world) {
