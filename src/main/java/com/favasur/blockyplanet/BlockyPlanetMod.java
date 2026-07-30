@@ -67,6 +67,7 @@ public class BlockyPlanetMod {
 
         NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onServerStarted);
         NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onPlayerJoinLevel);
+        NeoForge.EVENT_BUS.addListener(BlockyPlanetMod::onPlayerRespawn);
 
         BlockyPlanetModClient.init();
         NeoForge.EVENT_BUS.addListener(BlockyPlanetModClient::onScreenInit);
@@ -117,18 +118,41 @@ public class BlockyPlanetMod {
      * Teleport players to the planet surface when they join.
      * Replaces setDefaultSpawnPos which fails at extreme Y values
      * due to DimensionType logical height limits.
+     *
+     * Uses server.execute() to defer the teleport by one tick,
+     * avoiding "You logged in from another location" disconnect
+     * that occurs when teleporting during the login handshake.
      */
     public static void onPlayerJoinLevel(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event) {
         if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return;
         Level world = event.getLevel();
         if (!isBlockyPlanetDimension(world)) return;
 
+        // Defer one tick to avoid login desync
+        ((ServerLevel) world).getServer().execute(() -> {
+            double pr = QuadSphere.planetRadius();
+            int surfaceY = (int) Math.round(pr) + 16;
+            BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
+            player.teleportTo((ServerLevel) world, 0.5, surfaceY, 0.5,
+                java.util.Set.of(), 0.0f, 0.0f);
+            LOGGER.info("Teleported player to planet surface at {}", spawnPos);
+        });
+    }
+
+    /**
+     * Teleport players back to the surface on respawn.
+     * EntityJoinLevelEvent also fires on respawn in some NeoForge versions,
+     * but this dedicated handler ensures coverage.
+     */
+    public static void onPlayerRespawn(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerRespawnEvent event) {
+        if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return;
+        if (!isBlockyPlanetDimension(player.level())) return;
+
         double pr = QuadSphere.planetRadius();
         int surfaceY = (int) Math.round(pr) + 16;
-        BlockPos spawnPos = new BlockPos(0, surfaceY, 0);
-        player.teleportTo((ServerLevel) world, 0.5, surfaceY, 0.5,
+        player.teleportTo((ServerLevel) player.level(), 0.5, surfaceY, 0.5,
             java.util.Set.of(), 0.0f, 0.0f);
-        LOGGER.info("Teleported player to planet surface at {}", spawnPos);
+        LOGGER.info("Teleported player back to planet surface on respawn at Y={}", surfaceY);
     }
 
     private static boolean isCustomDimension(Level world) {
