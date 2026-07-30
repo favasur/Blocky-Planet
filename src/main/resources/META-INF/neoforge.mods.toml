@@ -2,7 +2,7 @@
 [[mods]]
 modId = "blocky_planet"
 version = "${mod_version}"
-displayName = "Blocky Planet"
+displayName = "Blocky Planet (NeoForge)"
 logoFile = "assets/blocky_planet/icon.png"
 credits = "BowerByte"
 authors = "BowerByte"
