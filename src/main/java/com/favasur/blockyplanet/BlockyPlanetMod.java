@@ -44,6 +44,12 @@ public class BlockyPlanetMod implements ModInitializer {
      */
     public static volatile World blockyWorld;
 
+    /**
+     * Reference to the overworld (used by Tellus surface reader).
+     * Set during server start when Tellus is loaded.
+     */
+    public static volatile World tellusOverworld;
+
     /** Set of WorldBorder instances that belong to the Blocky Planet dimension. */
     public static final Set<WorldBorder> BLOCKY_BORDERS = ConcurrentHashMap.newKeySet();
 
@@ -59,22 +65,26 @@ public class BlockyPlanetMod implements ModInitializer {
             BlockyPlanetChunkGenerator.CODEC
         );
 
-        // Capture the primary Blocky Planet world reference when the server starts
-        // Prefer our custom dimension, fall back to any world using our generator
+        // Capture world references when the server starts
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             for (ServerWorld sw : server.getWorlds()) {
+                // Capture Tellus overworld reference (used for surface block reading)
+                if (TELLUS_LOADED && sw.getRegistryKey().equals(World.OVERWORLD)) {
+                    tellusOverworld = sw;
+                    LOGGER.info("Captured Tellus overworld reference");
+                }
+                // Capture our custom dimension
                 if (isCustomDimension(sw)) {
                     blockyWorld = sw;
                     LOGGER.info("Captured Blocky Planet custom dimension: {}", sw.getRegistryKey().getValue());
-                    break;
                 }
             }
+            // Fall back to overworld if no custom dimension found
             if (blockyWorld == null) {
-                // Fall back to any world using our generator (e.g. overworld override)
                 for (ServerWorld sw : server.getWorlds()) {
                     if (isBlockyPlanetDimension(sw)) {
                         blockyWorld = sw;
-                        LOGGER.info("Captured override world: {}", sw.getRegistryKey().getValue());
+                        LOGGER.info("Captured planet world: {}", sw.getRegistryKey().getValue());
                         break;
                     }
                 }
@@ -82,9 +92,9 @@ public class BlockyPlanetMod implements ModInitializer {
         });
 
         if (TELLUS_LOADED) {
-            LOGGER.info("Tellus detected — keeping Blocky Planet as separate dimension, disabling overworld override.");
+            LOGGER.info("Tellus detected — planet surface reads Tellus terrain from overworld via projection.");
         } else {
-            LOGGER.info("No Tellus detected — overworld will use Blocky Planet generator.");
+            LOGGER.info("No Tellus — overworld uses Blocky Planet generator.");
         }
 
         LOGGER.info("Blocky Planet initialized! Default planet radius: {} blocks ({} km)",
@@ -95,18 +105,16 @@ public class BlockyPlanetMod implements ModInitializer {
     /**
      * Returns true if this world uses our spherical Blocky Planet chunk generator.
      *
-     * Checks both the dedicated {@code blocky_planet:blocky_planet} dimension and
-     * the vanilla overworld, which we override in our datapack data to use our
-     * generator. If Tellus is loaded, we skip the overworld override so Tellus
-     * can control the overworld instead.
-     *
-     * This is used by mixins to decide if cubic-world block storage should be active.
+     * When Tellus is loaded, the overworld uses Tellus's generator (not ours),
+     * so we only check our custom dimension ID here. The chunk generator's
+     * surface reader will project sphere coordinates to overworld coordinates
+     * and read Tellus blocks from {@link #tellusOverworld}.
      */
     public static boolean isBlockyPlanetDimension(World world) {
         if (world == null) return false;
         Identifier id = world.getRegistryKey().getValue();
         if (id.equals(DIMENSION_ID)) return true;
-        // Only check overworld if Tellus is NOT loaded (Tellus replaces overworld)
+        // Only include overworld if Tellus is NOT loaded (otherwise Tellus controls overworld)
         if (!TELLUS_LOADED && id.equals(Identifier.ofVanilla("overworld"))) return true;
         return false;
     }

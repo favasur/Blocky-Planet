@@ -400,6 +400,12 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
         double planetRadius = QuadSphere.planetRadius();
         double waterRadius = planetRadius * 0.95;
 
+        // ── When Tellus is loaded, read surface blocks from the overworld ──
+        if (BlockyPlanetMod.TELLUS_LOADED && BlockyPlanetMod.tellusOverworld != null) {
+            BlockState tellusBlock = getTellusSurfaceBlock(alignedPos);
+            if (tellusBlock != null) return tellusBlock;
+        }
+
         // Underwater (ocean floor)
         if (alignedDist <= waterRadius) {
             return getUnderwaterSurfaceBlock(alignedPos, isFallback);
@@ -420,25 +426,16 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
 
     /**
      * Query the actual biome's properties for the correct surface block.
-     * Uses the biome's registry path for reliable pattern matching.
+     * Uses the biome's registry ID for reliable pattern matching.
      * Falls back to noise-based classification for unknown biomes.
      */
     private BlockState getBiomeSurfaceBlock(Biome biome, Vector3d pos, double dist) {
-        // Get the biome identifier from its string representation
-        // Biome.toString() typically returns the registry path in 1.21
-        String path = "";
-        try {
-            path = biome.toString().toLowerCase();
-        } catch (Exception ignored) {}
+        // Get biome registry path for pattern matching
+        String path = getBiomePath(biome);
 
         // Snowy biomes
         if (path.contains("snow") || path.contains("frozen") || path.contains("ice")) {
             return Blocks.SNOW_BLOCK.getDefaultState();
-        }
-
-        // Taiga → podzol/grass
-        if (path.contains("taiga")) {
-            return Blocks.GRASS_BLOCK.getDefaultState();
         }
 
         // Desert / hot biomes
@@ -446,7 +443,7 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
             return path.contains("badlands") ? Blocks.RED_SAND.getDefaultState() : Blocks.SAND.getDefaultState();
         }
 
-        // Beach / shore
+        // Beach / shore / river
         if (path.contains("beach") || path.contains("shore") || path.contains("river")) {
             return Blocks.SAND.getDefaultState();
         }
@@ -461,8 +458,21 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
             return Blocks.MYCELIUM.getDefaultState();
         }
 
-        // Default: grass
+        // Default: grass (also handles taiga, plains, forest, jungle, etc.)
         return Blocks.GRASS_BLOCK.getDefaultState();
+    }
+
+    /**
+     * Extract the biome identifier path for pattern matching.
+     * Uses toString() which returns the registry path on Mojmap (NeoForge)
+     * and a class+hash on Yarn (Fabric). On Fabric, the fallback noise-based
+     * system handles surface blocks when pattern matching fails.
+     */
+    private String getBiomePath(Biome biome) {
+        try {
+            return biome.toString().toLowerCase();
+        } catch (Exception ignored) {}
+        return "";
     }
 
     /**
@@ -477,13 +487,65 @@ public class BlockyPlanetChunkGenerator extends ChunkGenerator {
     /**
      * Subsurface block (depth 1-4). Uses biome info if available.
      */
+    /**
+     * Read a surface block from the Tellus overworld via equirectangular projection.
+     * Projects the planet's spherical position to flat overworld coordinates,
+     * reads the Tellus-generated biome at that position, and returns the
+     * appropriate surface block for that biome.
+     */
+    private BlockState getTellusSurfaceBlock(Vector3d alignedPos) {
+        try {
+            World overworld = BlockyPlanetMod.tellusOverworld;
+            if (overworld == null) return null;
+
+            // Surface normal direction from planet center (unit vector)
+            double dist = alignedPos.length();
+            if (dist < 1) return null;
+            double nx = alignedPos.x() / dist;
+            double ny = alignedPos.y() / dist;
+            double nz = alignedPos.z() / dist;
+
+            // Spherical coordinates
+            double lat = Math.asin(ny);               // -π/2 to π/2
+            double lon = Math.atan2(nz, nx);           // -π to π
+
+            // Equirectangular projection to overworld flat coordinates
+            // 1 radian = planetRadius blocks on the surface
+            double scale = QuadSphere.planetRadius();
+            int ox = (int) Math.round(lon * scale);
+            int oz = (int) Math.round(lat * scale);
+
+            // Sample the Tellus overworld biome at the projected position
+            // Use Y=0 for biome sampling (biomes are 2D in 1.21)
+            Biome tellusBiome = overworld.getBiome(new BlockPos(ox, 0, oz)).value();
+            if (tellusBiome == null) return null;
+
+            // Also check if underwater in the Tellus overworld at this point
+            // Query the surface height to determine if it's ocean
+            int overworldSurfaceY = overworld.getTopY(Heightmap.Type.WORLD_SURFACE, ox, oz);
+            if (overworldSurfaceY <= overworld.getSeaLevel()) {
+                // Ocean or below sea level — use gravel/sand matching Tellus
+                String tPath = getBiomePath(tellusBiome);
+                if (tPath.contains("deep") || tPath.contains("ocean")) {
+                    return Blocks.GRAVEL.getDefaultState();
+                }
+                return Blocks.SAND.getDefaultState();
+            }
+
+            // Return the biome-matching surface block
+            return getBiomeSurfaceBlock(tellusBiome, alignedPos, dist);
+        } catch (Exception e) {
+            return null; // Silently fall back
+        }
+    }
+
     private BlockState getSubsurfaceBlock(Vector3d alignedPos, double alignedDist, Biome columnBiome) {
         double planetRadius = QuadSphere.planetRadius();
         double sandRadius = planetRadius * 0.97;
 
         // Use biome info if available
         if (columnBiome != null) {
-            String biomeId = columnBiome.toString().toLowerCase();
+            String biomeId = getBiomePath(columnBiome);
             if (biomeId.contains("desert") || biomeId.contains("badlands")) {
                 return biomeId.contains("badlands") ? Blocks.RED_SANDSTONE.getDefaultState() : Blocks.SANDSTONE.getDefaultState();
             }

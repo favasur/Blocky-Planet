@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:overworld",
+  "generator": {
+    "type": "blocky_planet:blocky_planet_generator",
+    "biome_source": {
+      "type": "minecraft:multi_noise",
+      "preset": "minecraft:overworld"
+    }
+  }
+}
