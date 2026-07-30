@@ -2,6 +2,7 @@
 .gradle/
 build/
 *.jar
+!gradle/wrapper/gradle-wrapper.jar
 *.log
 
 # IDE
