@@ -2,9 +2,9 @@
 //!
 //!   cargo run -p planet-lab                 # Earth-sized
 //!   cargo run -p planet-lab -- 500          # a small moon
-//!   cargo run -p planet-lab -- 12742000 42  # diameter 12,742,000, seed 42
+//!   cargo run -p planet-lab -- 12742000 42  # radius 12,742,000, seed 42
 
-use blocky_planet_core::{Block, LocalFrame, Planet, Vec3, ALL_SECTORS};
+use blocky_planet_core::{Block, LocalFrame, LocalWindow, Planet, Vec3, ALL_SECTORS};
 use std::time::Instant;
 
 fn main() {
@@ -22,9 +22,11 @@ fn main() {
     println!("Blocky Planet model");
     println!("  radius            {} blocks", thousands(radius));
     println!(
-        "  diameter          {} blocks",
-        thousands(radius.saturating_mul(2))
+        "  diameter          {} blocks ({} km)",
+        thousands(radius.saturating_mul(2)),
+        thousands_u128((radius as f64 * 2.0 / 1000.0).round() as u128)
     );
+    println!("  type              {}", planet.profile.kind.label());
     println!("  shells            {}", planet.shell_count());
     println!(
         "  surface shell     {k}  ({}..{:.0} blocks)",
@@ -46,11 +48,23 @@ fn main() {
         )
     );
 
-    let at = Vec3::new(planet.radius, 0.0, 0.0);
+    println!("\nLayers (real Earth values, scaled to this radius)");
+    for layer in &planet.profile.layers {
+        let km = layer.thickness_fraction() * planet.radius / 1000.0;
+        let blocks = layer.thickness_fraction() * planet.radius;
+        println!(
+            "  {:<12} {:>10} km {:>14} blocks  {:>5.2}% volume",
+            layer.name(),
+            thousands_u128(km.round() as u128),
+            thousands_u128(blocks.round() as u128),
+            layer.volume_share() * 100.0
+        );
+    }
+
     let surf_x = planet.surface_radius_at(Vec3::X);
     let address = planet.address_of(Vec3::X * surf_x);
     println!(
-        "  address at +X     sector {} shell {} i {} j {} layer {}",
+        "\n  address at +X     sector {} shell {} i {} j {} layer {}",
         address.sector.name(),
         address.shell,
         address.i,
@@ -64,23 +78,22 @@ fn main() {
         planet.radius
     );
 
-    // Six sectors, each sampled at its centre: the same surface rules apply,
-    // with no pole and no seam in the middle of a face.
-    let core_shell = Vec3::X * (planet.radius * 0.60 - 2.0);
+    // The planet is solid; generation still only asks for a bounded band.
+    let band_depth = 256.0;
     println!(
-        "  block at 0.60R    {}  (shell {}, core shell)",
-        match planet.geometry_at(core_shell) {
-            Some(g) => g.describe(),
-            None => "no solid geometry".to_string(),
-        },
-        planet.address_of(core_shell).shell
+        "  generated band    {:.0} blocks = {:.4}% of the radius (planet itself is solid)",
+        band_depth,
+        100.0 * band_depth / planet.radius
     );
-    let column = planet.column_plan(Vec3::X);
-    let thickness = column.solid_thickness();
+    let core = Vec3::X * (planet.radius * 0.10);
     println!(
-        "  solid per column  {thickness:.0} blocks of {} ({:.0}x less to build)",
-        thousands(radius),
-        planet.radius / thickness
+        "  block at 0.10R    {:?}  ({}; shell {})",
+        planet.block_at(core),
+        planet
+            .geometry_at(core)
+            .map(|g| g.describe())
+            .unwrap_or_else(|| "no solid geometry".to_string()),
+        planet.address_of(core).shell
     );
 
     print!("  sector surfaces  ");
@@ -94,7 +107,6 @@ fn main() {
         );
     }
     println!();
-    let _ = at;
 
     println!(
         "\nGreat-circle cross-section (z = 0), 1 char ~= {} blocks",
@@ -142,7 +154,7 @@ fn main() {
     // when the planet is astronomically large.
     let feet = Vec3::new(planet.radius + 2.0, 0.0, 0.0);
     let frame = LocalFrame::at(feet);
-    let window = blocky_planet_core::LocalWindow::new([-16, -32, -16], [16, 16, 16]);
+    let window = LocalWindow::new([-16, -32, -16], [16, 16, 16]);
     let (solid, total) = window.count(&planet, &frame);
     println!(
         "\nLocal window 33x49x33: {solid}/{total} solid blocks ({:.1}%)",
@@ -162,7 +174,8 @@ fn main() {
         for z in 0..16 {
             for y in 0..64 {
                 let d = (Vec3::new(x as f64, y as f64, z as f64) * 0.02 + Vec3::X).normalized();
-                if planet.block_at(d * (surf_x - 0.5 - y as f64)).is_solid() {
+                let surface = planet.surface_radius_at(d);
+                if planet.block_at(d * (surface - 0.5 - y as f64)).is_solid() {
                     naive_solid += 1;
                 }
             }
@@ -174,10 +187,10 @@ fn main() {
     for x in 0..16 {
         for z in 0..16 {
             let d = (Vec3::new(x as f64, 0.0, z as f64) * 0.02 + Vec3::X).normalized();
-            let plan = planet.column_plan(d);
+            let column = planet.column(d);
             for y in 0..64 {
-                if plan
-                    .block_at(planet.seed, d, surf_x - 0.5 - y as f64)
+                if column
+                    .block_at(&planet, d, column.surface - 0.5 - y as f64)
                     .is_solid()
                 {
                     planned_solid += 1;
@@ -221,11 +234,12 @@ fn main() {
     );
 }
 
-fn thousands(mut n: u64) -> String {
+fn thousands(n: u64) -> String {
     if n == 0 {
         return "0".into();
     }
     let mut parts = Vec::new();
+    let mut n = n;
     while n > 0 {
         parts.push(n % 1000);
         n /= 1000;

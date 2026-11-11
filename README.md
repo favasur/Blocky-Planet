@@ -3,7 +3,7 @@
 A spherical planet of **any size**: a 500-block moon, an Earth-sized ball, or a
 world with a 9,000,000,000,000,000,000-block radius. You live on the outside of
 a ball of blocks, gravity pulls towards its centre, and you can dig from the
-surface to a hollow core.
+surface through real crust, mantle and core layers.
 
 This is the Rust Edition rewrite of the unfinished Java mod. Only its design
 documents were used; the code is new.
@@ -108,11 +108,11 @@ reaching the game as a crash or a NaN:
 3. **Cartesian core tier.** Below `r = 16` the shell grid is not used at all.
    Those cells meet at radius zero and collapse; inside instead is a plain
    `1x1x1` cube grid in planet space. No division by a zero radius.
-4. **Hollow interior.** The planet is hollow below `0.58 R`, with bedrock at
-   `0.58–0.60 R`, so the degenerate inner shells contain no solid blocks to
-   draw in the first place. Solid blocks begin where the wall's blocks are
-   1.4–2.3 blocks wide across the sizes tested (1.48 at r=64, 1.45 at r=500,
-   2.26 at Earth size), so digging to the core never reaches paper-thin cells.
+4. **Solid core, Cartesian tier.** Inside `r = 16` the shell grid is replaced
+   by 1×1×1 cubes, so the planet can be solid to its centre without ever
+   emitting a wedge that meets at zero radius. From `r = 16` outward the chord
+   width is at least about one block (1.48 at r=64, 1.45 at r=500, 2.26 at
+   Earth size), so a deep block is never paper-thin.
 
 `Planet::geometry_at` is the single gate: it returns a validated frustum, a
 core cube, or `None`. Nothing unvalidated leaves the model. The article's two
@@ -136,25 +136,29 @@ nothing until a block is actually written.
 ### Terrain
 
 Sampled from seeded 3D value-noise FBM **on the unit sphere**, not from a 2D
-height map — no seam and no latitude distortion. The planet is built from
-fixed-thickness bands, not a solid ball:
+height map — no seam and no latitude distortion.
 
-```
-space / water → grass → dirt → stone → deepslate   (crust, at most 128 blocks)
-              → void                                (no blocks generated)
-              → netherrack / lava ring at 0.70 R    (at most 256 blocks thick)
-              → void
-              → bedrock core shell at 0.60 R        (8 blocks thick)
-              → hollow void to r = 0
-```
+The planet is solid, and its default layers are Earth's real ones, stored as
+fractions of the surface radius so they scale with the diameter:
 
-Those bands are the generation fix, not a shortcut. At Earth size a column
-holds **392 solid blocks** against a **6,371,000-block radius** — 16,253× less
-work than walking the radius. `Planet::column_plan` samples the surface noise
-once per column and answers every block from the plan; `planet-lab` measures a
-**36.5×** speedup on a 16×16×64 chunk in a debug build (18.8 ms → 0.5 ms).
-That is the difference between the Java version's 3.26 billion iterations per
-chunk and 16,384.
+| layer | thickness at Earth | share of volume |
+| --- | --- | --- |
+| crust | 20 km | ~0.9% |
+| mantle | 2,871 km | ~83% |
+| outer core | 2,260 km | ~15.6% |
+| inner core | 1,220 km | ~0.7% |
+
+`LayerProfile::layer_at` classifies a radius in O(1). The top four blocks of
+the crust are grass and dirt; below that the layer's block takes over (stone,
+deepslate, lava, bedrock). A world-creation editor can change every thickness;
+the order and slider ranges are in [`docs/WORLD-CREATION.md`](docs/WORLD-CREATION.md).
+
+A solid planet cannot be generated column by column. Generation is a **bounded
+band**: 256 blocks around the surface, or around the player when underground.
+That is 0.004% of Earth's radius, and `LocalWindow::checked` refuses any window
+above 4,194,304 blocks, so the Java version's full-radius 3.26-billion-block
+chunk cannot be expressed. `Column` samples the surface noise once per column;
+`planet-lab` measures the per-column speedup on a 16×16×64 chunk.
 
 ### Gravity
 
@@ -187,7 +191,7 @@ blocky-planet/
 │   ├── hud.rs                 bottom-left diagnostics box
 │   ├── command.rs             /planet, /planet radius, /planet seed, /planet probe
 │   └── planet/                the pure model (compiled into the game)
-│       └── src/{sector,shell,address,noise,planet,frame,stream}.rs
+│       └── src/{sector,shell,address,noise,planet,layers,frame,stream}.rs
 ├── tools/planet-lab/          CLI: stats, ASCII cross-section, timing
 └── docs/MATH.md               formulas and worked numbers
 ```
@@ -197,7 +201,7 @@ blocky-planet/
 The model has no dependencies, so it builds and tests anywhere:
 
 ```bash
-cargo test                 # 25 model tests
+cargo test                 # 32 model tests
 cargo run -p planet-lab    # Earth-sized planet, cross-section, timing
 cargo run -p planet-lab -- 500 7
 cargo run -p planet-lab -- 12742000 42
@@ -227,12 +231,13 @@ anchored to the planet's `+X` surface until the streaming rebase lands:
 
 **Milestone 1 — the unbounded model (this commit).**
 
-* [x] 64-bit planet space, any radius up to 9.2e18, tested at 500 … 9e15
+* [x] 64-bit planet space, any radius up to 9.2e18, tested at 500 … 9e18
 * [x] quad-sphere sectors with a right-handed basis and seam flip
 * [x] doubling shells that do not overflow (the Java version's fatal bug)
 * [x] block addressing and chunk decomposition
-* [x] seamless 3D terrain in fixed-thickness bands (392 solid blocks per
-      column at Earth size), Nether ring, hollow bedrock core
+* [x] real Earth/Mars/Moon layer profiles (Earth: ~0.9% crust, ~83% mantle,
+      ~15.6% outer core, ~0.7% inner core), customizable per world
+* [x] bounded generation band for a solid planet; full-radius windows refused
 * [x] validated frustum shapes, Cartesian core tier, 1↔4 shell neighbours
 * [x] local frame + floating origin + window sampling, tested at Earth scale
 * [x] native bundle, HUD and commands written against Horizon's real hook

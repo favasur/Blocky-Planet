@@ -1,35 +1,24 @@
-//! The planet itself: radius, terrain and block lookup, with no upper bound.
+//! The planet: radius, layers, terrain and block lookup, with no upper bound.
 //!
-//! A radius is an `f64` over a `u64` input, so a planet may be a 500-block
-//! moon or 9.2e18 blocks across; the shell model only needs ~log2(r) shells.
+//! # Solid planet, bounded generation
 //!
-//! # Why this does not freeze
+//! An Earth-like planet is **solid**: the mantle and core exist all the way to
+//! the centre. Walking a whole column would be 6.37 million blocks, and the
+//! failed Java version paid for that twice — once iterating every Y, once
+//! calling noise per block.
 //!
-//! The failed Java version iterated every Y from the surface to the core and
-//! called noise per block: 12.7 million Y values times 256 columns, 3.26
-//! billion iterations per chunk. The planet is not solid, so that work was
-//! almost entirely air.
-//!
-//! Here the solid part is a set of **fixed-thickness bands**, as in the
-//! article's structure: a crust (at most 128 blocks), a Nether ring (at most
-//! 256 thick), and an 8-block core shell. Everything between them is void.
-//! A whole column therefore has a few hundred solid blocks regardless of the
-//! radius, and [`Planet::column_plan`] computes the surface noise **once per
-//! column** instead of once per block.
+//! This model never walks a column. Layer profiles classify a *radius* in O(1)
+//! (see `layers.rs`), and generation is a bounded band around the surface or
+//! the player. A surface band 256 blocks deep is 0.004% of the radius; the
+//! window budget in `stream.rs` refuses anything larger. The planet can be
+//! solid and still generation is local.
 
 use crate::address::{AddressSpace, BlockAddress, CoreAddress};
+use crate::layers::{LayerProfile, PlanetKind, PlanetSettings, SettingsError};
 use crate::noise;
 use crate::shape::{BlockGeometry, BlockShape, MIN_SHELL_RADIUS};
 use crate::shell::ShellModel;
 use crate::vec::Vec3;
-
-/// Salt for the Nether ring's noise, so it does not echo the surface.
-const NETHER_SALT: u64 = 0x4E45_5448_4552_0001;
-
-/// Thickest the surface crust ever gets, in blocks.
-pub const MAX_CRUST: f64 = 128.0;
-/// Thickness of the solid bedrock shell around the hollow core.
-pub const CORE_SHELL: f64 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Block {
@@ -64,92 +53,45 @@ impl Block {
     }
 }
 
-/// Radial solid bands for one column, computed once.
+/// The surface of one column: everything needed to classify a radius without
+/// resampling the terrain noise.
 #[derive(Clone, Copy, Debug)]
-pub struct ColumnPlan {
+pub struct Column {
     pub surface: f64,
     pub sea: f64,
-    /// `(inner, outer)` of the surface crust.
-    pub crust: (f64, f64),
-    /// `(inner, outer)` of the Nether ring, when it fits below the crust.
-    pub ring: Option<(f64, f64)>,
-    /// `(inner, outer)` of the solid core shell above the hollow centre.
-    pub core: Option<(f64, f64)>,
 }
 
-impl ColumnPlan {
-    /// Solid radial spans, outermost first.
-    pub fn solid_spans(&self) -> Vec<(f64, f64)> {
-        let mut spans = vec![self.crust];
-        if let Some(r) = self.ring {
-            spans.push(r);
-        }
-        if let Some(c) = self.core {
-            spans.push(c);
-        }
-        spans
-    }
-
-    /// Total solid thickness of the column. Independent of the planet radius,
-    /// which is the whole point: a few hundred blocks, not millions.
-    pub fn solid_thickness(&self) -> f64 {
-        self.solid_spans()
-            .iter()
-            .map(|(inner, outer)| (outer - inner).max(0.0))
-            .sum()
-    }
-
-    /// Classify a radius in this column without resampling the surface noise.
-    pub fn block_at(&self, seed: u64, dir: Vec3, r: f64) -> Block {
+impl Column {
+    pub fn block_at(&self, planet: &Planet, _dir: Vec3, r: f64) -> Block {
         if r > self.surface {
-            return if r <= self.sea {
+            return if planet.profile.has_ocean() && r <= self.sea {
                 Block::Water
             } else {
                 Block::Air
             };
         }
 
-        if r >= self.crust.0 && r <= self.crust.1 {
-            let depth = self.surface - r;
-            return if depth < 1.0 {
-                Block::Grass
-            } else if depth < 4.0 {
-                Block::Dirt
-            } else if depth < 96.0 {
-                Block::Stone
-            } else {
-                Block::Deepslate
-            };
+        let depth = self.surface - r;
+        if depth < 1.0 {
+            return planet.profile.surface_block();
+        }
+        if depth < 4.0 {
+            return planet.profile.subsurface_block();
         }
 
-        if let Some((inner, outer)) = self.ring {
-            if r >= inner && r <= outer {
-                let n = noise::fbm(dir * 12.0, seed ^ NETHER_SALT, 3);
-                return if n > 0.45 {
-                    Block::Lava
-                } else {
-                    Block::Netherrack
-                };
-            }
-        }
-
-        if let Some((inner, outer)) = self.core {
-            if r >= inner && r <= outer {
-                return Block::Bedrock;
-            }
-        }
-
-        Block::Air
+        let fraction = (r / planet.radius.max(1.0)).clamp(0.0, 1.0);
+        planet.profile.block_at(fraction)
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Planet {
     /// Surface radius in blocks. No limit: the engine never stores the whole
     /// planet, it stores the window the player is in.
     pub radius: f64,
     pub seed: u64,
     pub shells: ShellModel,
+    pub profile: LayerProfile,
     /// Peak terrain offset from the mean radius, in blocks.
     pub terrain_amplitude: f64,
     /// How far below the mean radius the sea sits.
@@ -158,16 +100,30 @@ pub struct Planet {
 
 impl Planet {
     pub fn new(radius: u64, seed: u64) -> Self {
+        Self::with_profile(radius, seed, LayerProfile::for_kind(PlanetKind::EarthLike))
+    }
+
+    pub fn with_profile(radius: u64, seed: u64, profile: LayerProfile) -> Self {
         let r = radius as f64;
         Self {
             radius: r,
             seed,
             shells: ShellModel::default(),
+            profile,
             // Relative, with an absolute ceiling so Earth's terrain stays
             // Minecraft-sized rather than continental.
             terrain_amplitude: (r * 0.01).clamp(2.0, 64.0),
             sea_level_drop: (r * 0.002).clamp(1.0, 10.0),
         }
+    }
+
+    pub fn from_settings(settings: &PlanetSettings) -> Result<Self, SettingsError> {
+        let profile = settings.profile()?;
+        Ok(Self::with_profile(
+            settings.diameter_blocks(),
+            settings.seed,
+            profile,
+        ))
     }
 
     /// Surface radius along a direction: the mean radius plus 3D noise.
@@ -179,47 +135,29 @@ impl Planet {
         self.radius + n * self.terrain_amplitude
     }
 
-    /// Crust thickness: relative for tiny worlds, capped at [`MAX_CRUST`].
-    pub fn crust_thickness(&self) -> f64 {
-        (self.radius * 0.20).clamp(8.0, MAX_CRUST)
+    /// Surface column: one noise sample, reused for every block in it.
+    pub fn column(&self, dir: Vec3) -> Column {
+        Column {
+            surface: self.surface_radius_at(dir),
+            sea: self.radius - self.sea_level_drop,
+        }
     }
 
-    /// Radial bands for one direction. One noise sample per column.
-    pub fn column_plan(&self, dir: Vec3) -> ColumnPlan {
-        let surface = self.surface_radius_at(dir);
-        let sea = self.radius - self.sea_level_drop;
-        let crust_outer = surface;
-        let crust_inner = (surface - self.crust_thickness()).max(0.0);
-
-        let core_outer = self.radius * 0.60;
-        let core_inner = (core_outer - CORE_SHELL).max(self.radius * 0.58);
-        let core = (core_outer > core_inner && core_outer < crust_inner)
-            .then_some((core_inner, core_outer));
-
-        let ring_inner = self.radius * 0.70;
-        let ring_outer =
-            (ring_inner + (self.radius * 0.02).clamp(2.0, 256.0)).min(crust_inner - 1.0);
-        let below_core = core.map(|(_, outer)| outer).unwrap_or(0.0);
-        let ring = (ring_inner > below_core && ring_outer > ring_inner)
-            .then_some((ring_inner, ring_outer));
-
-        ColumnPlan {
-            surface,
-            sea,
-            crust: (crust_inner, crust_outer),
-            ring,
-            core,
-        }
+    pub fn crust_thickness(&self) -> f64 {
+        self.profile.layers[0].thickness_fraction() * self.radius
     }
 
     /// The block at a planet-space point. `p` may be at any distance.
     pub fn block_at(&self, p: Vec3) -> Block {
         let r = p.length();
-        if r == 0.0 || !r.is_finite() {
+        if !r.is_finite() {
             return Block::Air;
         }
+        if r == 0.0 {
+            return self.profile.block_at(0.0);
+        }
         let dir = p / r;
-        self.column_plan(dir).block_at(self.seed, dir, r)
+        self.column(dir).block_at(self, dir, r)
     }
 
     /// The block's address (sector, shell, chunk, block).
@@ -237,10 +175,7 @@ impl Planet {
     }
 
     /// Geometry the game may use for a solid block, or `None` when the block is
-    /// not solid, is outside the planet, or its shape fails validation.
-    ///
-    /// This is the single gate that keeps depth math out of collision and
-    /// rendering: nothing unvalidated is ever returned.
+    /// not solid or its shape fails validation.
     pub fn geometry_at(&self, p: Vec3) -> Option<BlockGeometry> {
         if !self.block_at(p).is_solid() {
             return None;
@@ -262,9 +197,8 @@ impl Planet {
         self.shells.shell_count(self.radius)
     }
 
-    /// Gravity acceleration at a radius, for the mod's motion model: constant
-    /// above the surface (predictable gameplay), falling to zero towards the
-    /// centre, where the planet pulls equally in every direction.
+    /// Gravity acceleration at a radius: constant above the surface,
+    /// falling to zero towards the centre.
     pub fn gravity_at(&self, r: f64, surface_g: f64) -> f64 {
         let surface = self.radius.max(1.0);
         if r >= surface {

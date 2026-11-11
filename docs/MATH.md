@@ -101,15 +101,14 @@ Anything else returns `None` — the engine draws and collides nothing there.
 **The centre.** Shell 0 starts at `r = 0`, and every cell there is a wedge of
 zero width. The model therefore does not use the shell grid below
 `MIN_SHELL_RADIUS = 16`: that region is a Cartesian `1x1x1` grid in planet
-space (a cube tier), addressed by `CoreAddress`. There is no division by a
-zero radius and no zero-width cell. On top of that, the planet is hollow below
-`0.58 R`, so the degenerate central shells hold no solid blocks at all.
+space (a cube tier), addressed by `CoreAddress`. There is no division by a zero
+radius and no zero-width cell. The planet is solid to the centre, so this tier
+is the floor that makes a real core possible without degenerate wedges.
 
-For an Earth-sized planet `0.58 R ≈ 3,695,000` lies in shell 17, whose
-resolution is 3,276,800 per side. The chord-based width of that block is
-**2.26 blocks** (aspect 2.26), which `planet-lab` prints directly. Across the
-sizes tested the hollow wall's blocks are 1.45–2.26 blocks wide, so digging to
-the core never reaches a paper-thin cell.
+At `r = 16` the shell width is about one block, and it grows in proportion to
+radius; the chord width is 1.48 blocks at r=64, 1.45 at r=500 and 2.26 in
+Earth's shell 17. Those are the thinnest cells a solid interior can produce,
+and they pass the shape contract above.
 
 **Neighbour topology.** At the top layer of shell `k`, the next shell has twice
 the resolution, so one block maps to the 2x2 group
@@ -150,25 +149,25 @@ surface(dir) = R + A · fbm(dir · 3, seed, 4),   A = 64 blocks
 ```
 
 The direction is a unit vector, so the noise wraps perfectly: one ocean, no
-seam. The solid planet is a set of fixed-thickness bands, not a solid ball:
+seam. The planet is solid, with real layers as fractions of the radius:
 
-| band | radial range | blocks |
-| --- | --- | --- |
-| crust | `surface − 128 … surface` | grass, dirt, stone, deepslate |
-| void | below the crust | none generated |
-| Nether ring | `0.70 R … 0.70 R + min(0.02 R, 256)` | netherrack, lava pockets |
-| void | below the ring | none generated |
-| core shell | `0.60 R − 8 … 0.60 R` | bedrock |
-| hollow | `0 … 0.60 R − 8` | none |
+| layer | Earth thickness | fraction | volume share |
+| --- | --- | --- | --- |
+| crust | 20 km | 0.00314 | ~0.9% |
+| mantle | 2,871 km | 0.4507 | ~83% |
+| outer core | 2,260 km | 0.3547 | ~15.6% |
+| inner core | 1,220 km | 0.1915 | ~0.7% |
 
-Within the crust, depth picks the block: `< 1` grass, `< 4` dirt, `< 96`
-stone, otherwise deepslate. Crust thickness is `clamp(0.20 R, 8, 128)`.
+`LayerProfile::layer_at(r / R)` classifies a radius in O(1). The top four
+blocks are the surface block (grass, dirt or stone) and its subsurface block;
+below that the layer block applies. Profile fractions are normalized, so a
+custom thickness cannot leave a gap or an overlap.
 
-This is what keeps generation finite. Total solid thickness per column is at
-most `128 + 256 + 8 = 392` blocks regardless of radius; at Earth size that is
-16,253× less than the radius. `ColumnPlan` stores the surface once per column
-and classifies radii from it, so noise is sampled once per column, not once
-per block.
+A full column is never generated. The surface band is 256 blocks, or the band
+around the player when underground; `LocalWindow::checked` refuses anything
+above 4,194,304 blocks. `Column` stores the surface once per column so noise is
+sampled per column, not per block. The Java version's 3.26-billion-iteration
+chunk cannot be expressed.
 
 ## 5. Gravity
 
@@ -206,4 +205,6 @@ that.
 | chunks in the surface shell | 409,600² × 262,144 ≈ 4.4 × 10¹⁶ sparse slots |
 | block width at shell bottom | 1.005 blocks |
 | local window the engine holds | 33 × 49 × 33 ≈ 53,000 blocks |
+| generated surface band | 256 blocks (0.004% of the radius) |
+| solid blocks in a column | ~6.37 million (classified, never walked) |
 | planet blocks the engine holds | 0 (it holds only the window) |

@@ -13,14 +13,21 @@
 //!   resolution as they move outward, keeping blocks roughly cubic at every
 //!   depth while letting the planet grow without any hard limit;
 //! * a **block address** of sector -> shell -> chunk -> block;
+//! * real **layer profiles** (crust, mantle, core), with Earth's proportions
+//!   as the default and per-world overrides;
 //! * terrain sampled from 3D noise on the unit sphere (no seams, no
 //!   latitude/longitude distortion).
+//!
+//! An Earth-like planet is solid to its centre. Generation still stays local:
+//! layer profiles classify a radius in O(1), and a bounded surface/player band
+//! is generated instead of a full column. See `planet.rs` and `stream.rs`.
 //!
 //! Everything here is plain `f64`/integer math, so it unit-tests on the host
 //! with `cargo test` and compiles into the game unchanged.
 
 pub mod address;
 pub mod frame;
+pub mod layers;
 pub mod lod;
 pub mod noise;
 pub mod planet;
@@ -32,12 +39,16 @@ pub mod vec;
 
 pub use address::{AddressSpace, BlockAddress, CoreAddress, ShellChunk};
 pub use frame::LocalFrame;
+pub use layers::{
+    Layer, LayerId, LayerProfile, PlanetKind, PlanetSettings, SettingsError, EARTH_DIAMETER_KM,
+    MAX_DIAMETER_KM, MIN_DIAMETER_KM,
+};
 pub use lod::{horizon_distance, surface_drop, Atmosphere, LodPlan, LodRing};
-pub use planet::{Block, Planet};
+pub use planet::{Block, Column, Planet};
 pub use sector::{Sector, ALL_SECTORS};
 pub use shape::{BlockGeometry, BlockShape};
 pub use shell::ShellModel;
-pub use stream::LocalWindow;
+pub use stream::{LocalWindow, WindowError, MAX_WINDOW_BLOCKS};
 pub use vec::Vec3;
 
 /// Chunks are 16x16x16 blocks, as in the article, so chunk work is uniform
@@ -113,14 +124,12 @@ mod tests {
             assert_eq!(address.sector, Sector::PosX);
             // Nothing panics at the outer edge, into space, or at the core.
             assert_eq!(planet.block_at(p * 1.5), Block::Air);
-            assert_eq!(planet.block_at(Vec3::ZERO), Block::Air);
+            assert!(planet.block_at(Vec3::ZERO).is_solid());
             let surface = planet.surface_radius_at(Vec3::X);
             assert!(planet.block_at(Vec3::X * (surface - 1.0)).is_solid());
-            // Below the crust is void, not millions of deepslate blocks.
-            // (Beyond 2^53 a 300-block subtraction no longer changes the f64.)
-            if surface - 300.0 != surface {
-                assert_eq!(planet.block_at(Vec3::X * (surface - 300.0)), Block::Air);
-            }
+            // The planet is solid, but a column is never generated as a whole;
+            // a bounded band is. This lookup is O(1), not O(radius).
+            assert!(planet.block_at(Vec3::X * (surface - 1_000.0)).is_solid());
         }
     }
 
@@ -162,17 +171,20 @@ mod tests {
     }
 
     #[test]
-    fn terrain_is_deterministic_and_layered() {
+    fn terrain_is_deterministic_and_follows_the_layers() {
         let planet = Planet::new(EARTH, 42);
         let dir = Vec3::X;
-        let p = dir * planet.surface_radius_at(dir);
         let surface = planet.surface_radius_at(dir);
+        let p = dir * surface;
 
         assert_eq!(planet.block_at(p), Block::Grass);
         assert_eq!(planet.block_at(dir * (surface - 2.0)), Block::Dirt);
         assert_eq!(planet.block_at(dir * (surface - 40.0)), Block::Stone);
-        assert_eq!(planet.block_at(dir * (surface - 100.0)), Block::Deepslate);
-        assert_eq!(planet.block_at(dir * (surface - 300.0)), Block::Air);
+        // Earth's crust is ~20 km, so 30 km down is already mantle.
+        assert_eq!(
+            planet.block_at(dir * (surface - 30_000.0)),
+            Block::Deepslate
+        );
         assert_eq!(
             planet.block_at(Vec3::new(1.0, 2.0, 3.0) * 10.0),
             planet.block_at(Vec3::new(1.0, 2.0, 3.0) * 10.0)
@@ -180,17 +192,32 @@ mod tests {
     }
 
     #[test]
-    fn the_core_is_hollow_with_a_bedrock_shell() {
+    fn the_core_is_solid_and_made_of_real_layers() {
         let planet = Planet::new(EARTH, 42);
-        assert_eq!(planet.block_at(Vec3::ZERO), Block::Air);
+        assert_eq!(planet.block_at(Vec3::ZERO), Block::Bedrock);
         assert_eq!(
-            planet.block_at(Vec3::X * (planet.radius * 0.60 - 2.0)),
+            planet.block_at(Vec3::X * (planet.radius * 0.10)),
             Block::Bedrock
         );
         assert_eq!(
-            planet.block_at(Vec3::X * (planet.radius * 0.50)),
-            Block::Air
+            planet.block_at(Vec3::X * (planet.radius * 0.40)),
+            Block::Lava
         );
+        assert_eq!(
+            planet.block_at(Vec3::X * (planet.radius * 0.80)),
+            Block::Deepslate
+        );
+    }
+
+    #[test]
+    fn layer_boundaries_scale_with_the_planet() {
+        for radius in [500u64, EARTH] {
+            let planet = Planet::new(radius, 4);
+            let r = planet.radius;
+            assert_eq!(planet.block_at(Vec3::X * (r * 0.80)), Block::Deepslate);
+            assert_eq!(planet.block_at(Vec3::X * (r * 0.40)), Block::Lava);
+            assert_eq!(planet.block_at(Vec3::X * (r * 0.10)), Block::Bedrock);
+        }
     }
 
     #[test]
@@ -224,7 +251,6 @@ mod tests {
         let feet = Vec3::X * (surface + 0.5);
         let frame = LocalFrame::at(feet);
         let window = LocalWindow::new([-4, -24, -4], [4, 4, 4]);
-        let _ = window;
         let (solid, total) = window.count(&planet, &frame);
         assert_eq!(total, 9 * 29 * 9);
         assert!(solid > 0, "no ground in the window");
@@ -235,6 +261,31 @@ mod tests {
         let above = frame.to_planet_block([0, 20, 0]);
         assert!(planet.block_at(below).is_solid());
         assert!(!planet.block_at(above).is_solid());
+    }
+
+    #[test]
+    fn generation_is_a_bounded_surface_band_not_a_full_column() {
+        // The planet is solid, so the *generated* region must be bounded.
+        let band = LocalWindow::new([-16, -256, -16], [16, 0, 16]);
+        assert!(band.checked().is_ok());
+        assert_eq!(band.volume(), 33 * 257 * 33);
+
+        for radius in [500u64, EARTH, 9_000_000_000_000_000_000] {
+            let planet = Planet::new(radius, 9);
+            let column = planet.column(Vec3::X);
+            let surface = column.surface;
+            // A fixed 256-block band at planetary size; a 500-block moon is
+            // shallower than that, so probe no deeper than its crust.
+            let depth = 256.0_f64.min(planet.radius * 0.01);
+            // Beyond 2^53 a small subtraction no longer changes the f64, so
+            // only check representable probes.
+            if surface - depth < surface {
+                assert!(planet.block_at(Vec3::X * (surface - depth)).is_solid());
+            }
+            if radius >= EARTH {
+                assert!((radius as f64 / depth) > 10_000.0);
+            }
+        }
     }
 
     #[test]
@@ -305,52 +356,16 @@ mod tests {
     }
 
     #[test]
-    fn a_column_is_a_few_hundred_solid_blocks_not_millions() {
-        for radius in [500u64, EARTH, 9_000_000_000_000_000_000] {
-            let planet = Planet::new(radius, 2);
-            for s in ALL_SECTORS {
-                let plan = planet.column_plan(s.position(0.2, -0.3, 1.0));
-                let thickness = plan.solid_thickness();
-                assert!(thickness <= 400.0, "{thickness} solid blocks at r={radius}");
-                assert!(thickness.is_finite());
-                // The full radius is orders of magnitude larger; generation must
-                // never walk it block by block.
-                if planet.radius > 10_000.0 {
-                    assert!(planet.radius / thickness > 10_000.0);
-                }
-                let solid = plan
-                    .solid_spans()
-                    .iter()
-                    .all(|(a, b)| a.is_finite() && b.is_finite() && b >= a);
-                assert!(solid);
-            }
-        }
-    }
-
-    #[test]
-    fn a_column_plan_matches_per_block_lookup() {
-        let planet = Planet::new(EARTH, 11);
-        for s in ALL_SECTORS {
-            for (u, v) in [(0.1, 0.4), (-0.6, 0.8)] {
-                let dir = s.position(u, v, 1.0);
-                let plan = planet.column_plan(dir);
-                for depth in [0.5, 2.0, 20.0, 120.0, 200.0] {
-                    let r = plan.surface - depth;
-                    assert_eq!(planet.block_at(dir * r), plan.block_at(planet.seed, dir, r));
-                }
-            }
-        }
-    }
-
-    #[test]
     fn a_window_larger_than_the_budget_is_refused() {
         let huge = LocalWindow::new([-1000, -1_000_000, -1000], [1000, 1_000_000, 1000]);
         assert!(huge.checked().is_err());
         let normal = LocalWindow::new([-8, -16, -8], [8, 8, 8]);
         assert!(normal.checked().is_ok());
         assert_eq!(normal.volume(), 17 * 25 * 17);
+        assert_eq!(normal.checked().unwrap().volume(), 17 * 25 * 17);
     }
 
+    #[test]
     fn a_shell_chunk_decomposes_and_recomposes_an_address() {
         let shells = ShellModel::default();
         let a = BlockAddress {
@@ -400,5 +415,21 @@ mod tests {
         let geometry = planet.geometry_at(p);
         assert!(geometry.is_none() || geometry.map(|g| g.is_valid()).unwrap_or(false));
         assert!(!geometry.map(|g| g.min_edge()).unwrap_or(1.0).is_nan());
+    }
+
+    #[test]
+    fn settings_build_a_planet_with_the_chosen_layers() {
+        let settings = PlanetSettings {
+            advanced_layers: true,
+            layer_fractions: vec![0.05, 0.45, 0.30, 0.20],
+            diameter_km: 12_742.0,
+            seed: 8,
+            ..PlanetSettings::earth_default()
+        };
+        let planet = Planet::from_settings(&settings).unwrap();
+        assert_eq!(planet.profile.layer_at(0.97).id, LayerId::Crust);
+        assert_eq!(planet.profile.layer_at(0.50).id, LayerId::Mantle);
+        assert_eq!(planet.profile.layer_at(0.20).id, LayerId::OuterCore);
+        assert_eq!(planet.profile.layer_at(0.10).id, LayerId::InnerCore);
     }
 }
