@@ -118,6 +118,42 @@ impl BlockAddress {
     }
 }
 
+/// A 16x16x16 **spherical** chunk: a box in shell space, not an engine chunk
+/// column. The engine cannot store one of these; it is the unit the mod
+/// streams from planet space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ShellChunk {
+    pub sector: Sector,
+    pub shell: u32,
+    pub i: u128,
+    pub layer: u128,
+    pub j: u128,
+}
+
+impl ShellChunk {
+    pub fn of(a: &BlockAddress) -> Self {
+        let (i, layer, j, _) = a.chunk();
+        Self {
+            sector: a.sector,
+            shell: a.shell,
+            i,
+            layer,
+            j,
+        }
+    }
+
+    /// Address of a block inside the chunk (local indices are taken modulo 16).
+    pub fn address(&self, local: [u128; 3]) -> BlockAddress {
+        BlockAddress {
+            sector: self.sector,
+            shell: self.shell,
+            i: self.i * CHUNK_SIZE + local[0] % CHUNK_SIZE,
+            layer: self.layer * CHUNK_SIZE + local[1] % CHUNK_SIZE,
+            j: self.j * CHUNK_SIZE + local[2] % CHUNK_SIZE,
+        }
+    }
+}
+
 /// A unit cube in planet space, used only inside [`crate::shape::MIN_SHELL_RADIUS`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CoreAddress {

@@ -242,3 +242,12 @@ anchored to the planet's `+X` surface until the streaming rebase lands:
 I will not claim the planet is walkable until step 2 is done: that is the one
 piece the current API cannot express, and it is called out here rather than
 hidden behind a screenshot.
+
+## Earth-sized planets
+
+What an Earth-sized, playable planet needs — bent horizon, tapered blocks,
+spherical chunks, vertical LOD, radial gravity and atmosphere — is assessed
+feature by feature in [`docs/PLAN-EARTH.md`](docs/PLAN-EARTH.md). The short
+version: the model supports the size; curvature is invisible locally (0.08
+blocks over 64 chunks), so the horizon, far LOD and atmosphere are rendering
+and hook problems, not planet-data problems.

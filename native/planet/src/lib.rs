@@ -21,6 +21,7 @@
 
 pub mod address;
 pub mod frame;
+pub mod lod;
 pub mod noise;
 pub mod planet;
 pub mod sector;
@@ -29,8 +30,9 @@ pub mod shell;
 pub mod stream;
 pub mod vec;
 
-pub use address::{AddressSpace, BlockAddress, CoreAddress};
+pub use address::{AddressSpace, BlockAddress, CoreAddress, ShellChunk};
 pub use frame::LocalFrame;
+pub use lod::{horizon_distance, surface_drop, Atmosphere, LodPlan, LodRing};
 pub use planet::{Block, Planet};
 pub use sector::{Sector, ALL_SECTORS};
 pub use shape::{BlockGeometry, BlockShape};
@@ -287,6 +289,24 @@ mod tests {
             assert!(planet.surface_radius_at(dir) < planet.radius * 1.1);
         }
         assert!(planet.block_at(Vec3::X * 60.0).is_solid());
+    }
+
+    #[test]
+    fn a_shell_chunk_decomposes_and_recomposes_an_address() {
+        let shells = ShellModel::default();
+        let a = BlockAddress {
+            sector: Sector::NegZ,
+            shell: 7,
+            i: 12345,
+            j: 6789,
+            layer: 900,
+        };
+        let chunk = ShellChunk::of(&a);
+        let (_, _, _, local) = a.chunk();
+        assert_eq!(chunk.address(local), a);
+        assert_eq!(chunk.shell, 7);
+        assert!(chunk.address([16, 0, 0]).i == chunk.i * 16);
+        let _ = shells;
     }
 
     #[test]
