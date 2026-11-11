@@ -175,11 +175,13 @@ centre, where the planet pulls equally in every direction — the article's
 
 `LocalFrame::at(feet)` builds `(east, up, north)` from the radial up vector.
 `to_local` / `to_planet` convert between planet space and the engine's box.
-`GenerationWindow::around` builds the bounded block band (default
-17×321×17) around a moving player; `ChunkStream` tracks the spherical 16³
-chunks and returns only the chunks that enter the window after a horizontal or
-vertical move. The engine writer still has to place those chunks, but the
-planet-space scheduler and the layer sampling are in place.
+`GenerationWindow` builds the bounded block band around a moving player;
+`ChunkStream` tracks the spherical 16³ chunks and returns only the chunks that
+enter the window after a horizontal or vertical move. `EngineWriter` maps those
+chunks to engine-local columns, emits a `WriteBatch`, and rebases the frame
+when the player moves more than 256 blocks — clearing only the blocks it
+generated. The native `player_tick` injection converts each non-empty batch to
+one `NativeBlockEdit` and calls `native_edit_blocks` (API 126).
 
 ## Layout
 
@@ -204,7 +206,7 @@ blocky-planet/
 The model has no dependencies, so it builds and tests anywhere:
 
 ```bash
-cargo test                 # 34 model tests
+cargo test                 # 35 model tests
 cargo run -p planet-lab    # Earth-sized planet, cross-section, timing
 cargo run -p planet-lab -- 500 7
 cargo run -p planet-lab -- 12742000 42
@@ -241,6 +243,8 @@ anchored to the planet's `+X` surface until the streaming rebase lands:
 * [x] real Earth/Mars/Moon layer profiles (Earth: ~0.9% crust, ~83% mantle,
       ~15.6% outer core, ~0.7% inner core), customizable per world
 * [x] bounded generation band for a solid planet; full-radius windows refused
+* [x] `EngineWriter` + native `player_tick` adapter using `native_edit_blocks`
+      (written against the API; not yet compiled against a Horizon commit)
 * [x] validated frustum shapes, Cartesian core tier, 1↔4 shell neighbours
 * [x] local frame + floating origin + window sampling, tested at Earth scale
 * [x] native bundle, HUD and commands written against Horizon's real hook

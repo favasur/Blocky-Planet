@@ -153,11 +153,12 @@ atmosphere belongs in the pack.
 
 ## Milestones
 
-1. **Streaming writer** (no engine changes): the model now has
-   `GenerationWindow` (bounded surface/player band) and `ChunkStream` (only
-   newly entered shell chunks after a move). The remaining work is the engine
-   side: fill those chunks into local columns, rebase on a coarse lattice, and
-   write edits back. This turns the model into a place you can stand in.
+1. **Streaming writer**: `GenerationWindow`, `ChunkStream` and `EngineWriter`
+   are in the model, and `native/stream.rs` is injected into the server's
+   player tick: it converts new chunks to one `native_edit_blocks` (API 126)
+   edit. The remaining work is compiling and testing that adapter against a
+   Horizon commit, including chunk-load boundaries and rebasing across a
+   sector seam.
 2. **Horizon warp** (no engine changes): `world_warp` WGSL that bends the patch
    onto the sphere beyond a few hundred blocks, plus `LodPlan`-driven far
    geometry drawn through world primitives if the LOD hook stays unavailable.

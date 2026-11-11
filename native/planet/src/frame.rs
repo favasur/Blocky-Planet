@@ -38,6 +38,24 @@ impl LocalFrame {
         }
     }
 
+    /// A frame anchored at `planet` but whose local coordinates place `engine`
+    /// at the same position: `to_local(planet) == engine`. This is how a
+    /// floating-origin rebase keeps the player's engine coordinates fixed
+    /// while changing the radial up direction.
+    pub fn anchored(planet: Vec3, engine: Vec3) -> Self {
+        let up = planet.normalized();
+        let reference = if up.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+        let east = reference.cross(up).normalized();
+        let north = up.cross(east);
+        let origin = planet - east * engine.x - up * engine.y - north * engine.z;
+        Self {
+            origin,
+            east,
+            up,
+            north,
+        }
+    }
+
     /// Planet-space point -> local coordinates, in blocks.
     pub fn to_local(&self, p: Vec3) -> Vec3 {
         let d = p - self.origin;

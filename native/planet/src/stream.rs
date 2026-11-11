@@ -145,6 +145,13 @@ impl ChunkStream {
         self.loaded.len()
     }
 
+    /// Every chunk currently in range, for the first fill or a rebase.
+    pub fn loaded_chunks(&self) -> Vec<ShellChunk> {
+        let mut chunks: Vec<ShellChunk> = self.loaded.iter().copied().collect();
+        chunks.sort_by_key(|c| (c.shell, c.layer, c.i, c.j));
+        chunks
+    }
+
     /// Move the player and return the chunks that are newly in range.
     pub fn update(&mut self, player: Vec3) -> Vec<ShellChunk> {
         let needed = self.around(player);
@@ -208,6 +215,159 @@ impl ChunkStream {
     }
 }
 
+/// One block to place at an engine-local position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlockPlace {
+    pub pos: [i32; 3],
+    pub block: Block,
+}
+
+/// What the engine should change after [`EngineWriter::update`]. `clear`
+/// removes positions the writer generated in a previous frame; `set` places
+/// the new window. Both are engine-local block coordinates.
+#[derive(Clone, Debug, Default)]
+pub struct WriteBatch {
+    pub set: Vec<BlockPlace>,
+    pub clear: Vec<[i32; 3]>,
+    pub rebased: bool,
+}
+
+/// Connects planet-space chunk streaming to engine-local columns.
+///
+/// The writer owns a [`ChunkStream`], converts the blocks of every newly
+/// entered shell chunk into local coordinates, and emits only the bounded
+/// window around the player. On a large move it rebases the [`LocalFrame`]
+/// (keeping the player's engine coordinates fixed) and asks the caller to
+/// clear the blocks it previously generated. It never walks a planet column
+/// and never touches blocks outside its own window.
+pub struct EngineWriter {
+    pub frame: LocalFrame,
+    pub stream: ChunkStream,
+    pub horizontal: u128,
+    pub vertical: u128,
+    pub radius: i32,
+    pub down: i32,
+    pub up: i32,
+    pub rebase_distance: f64,
+    last_planet: Vec3,
+    generated: std::collections::HashMap<[i32; 3], Block>,
+    initialized: bool,
+}
+
+impl EngineWriter {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        frame: LocalFrame,
+        player_planet: Vec3,
+        planet: &Planet,
+        horizontal: u128,
+        vertical: u128,
+        radius: i32,
+        down: i32,
+        up: i32,
+    ) -> Self {
+        Self {
+            frame,
+            stream: ChunkStream::new(planet.shells, player_planet, horizontal, vertical),
+            horizontal,
+            vertical,
+            radius,
+            down,
+            up,
+            rebase_distance: 256.0,
+            last_planet: player_planet,
+            generated: std::collections::HashMap::new(),
+            initialized: false,
+        }
+    }
+
+    /// Generate what entered the window. `player_engine` is the player's
+    /// engine-local position; `player_planet` is the same point in planet
+    /// space under the writer's current frame.
+    pub fn update(
+        &mut self,
+        planet: &Planet,
+        player_engine: Vec3,
+        player_planet: Vec3,
+    ) -> WriteBatch {
+        let mut batch = WriteBatch::default();
+        let moved = (player_planet - self.last_planet).length();
+        let rebase = !self.initialized || moved > self.rebase_distance;
+
+        if rebase {
+            if self.initialized {
+                batch.clear.extend(self.generated.keys().copied());
+            }
+            self.frame = LocalFrame::anchored(player_planet, player_engine);
+            self.stream =
+                ChunkStream::new(planet.shells, player_planet, self.horizontal, self.vertical);
+            self.generated.clear();
+            self.last_planet = player_planet;
+            self.initialized = true;
+            batch.rebased = true;
+        }
+
+        let chunks = if rebase {
+            self.stream.loaded_chunks()
+        } else {
+            self.stream.update(player_planet)
+        };
+        let frame = self.frame;
+        let radius = self.radius;
+        let down = self.down;
+        let up = self.up;
+        let player = [
+            player_engine.x.floor() as i32,
+            player_engine.y.floor() as i32,
+            player_engine.z.floor() as i32,
+        ];
+        let generated = &mut self.generated;
+        let set = &mut batch.set;
+
+        for chunk in chunks {
+            // Skip chunks whose 16-block box cannot touch the view. Without
+            // this, the first fill samples every block of every shell chunk
+            // around the player even though most lie outside the window.
+            let chunk_center = frame.to_local(chunk.address([8, 8, 8]).center(&planet.shells));
+            let cx = chunk_center.x.floor() as i32;
+            let cy = chunk_center.y.floor() as i32;
+            let cz = chunk_center.z.floor() as i32;
+            if (cx - player[0]).abs() > radius + 8
+                || (cz - player[2]).abs() > radius + 8
+                || cy < player[1] - down - 8
+                || cy > player[1] + up + 8
+            {
+                continue;
+            }
+            self.stream.for_each_block(planet, chunk, |a, block| {
+                if block == Block::Air {
+                    return;
+                }
+                let local = frame.to_local(a.center(&planet.shells));
+                let pos = [
+                    local.x.floor() as i32,
+                    local.y.floor() as i32,
+                    local.z.floor() as i32,
+                ];
+                if (pos[0] - player[0]).abs() > radius
+                    || (pos[2] - player[2]).abs() > radius
+                    || pos[1] < player[1] - down
+                    || pos[1] > player[1] + up
+                {
+                    return;
+                }
+                if generated.get(&pos) == Some(&block) {
+                    return;
+                }
+                generated.insert(pos, block);
+                set.push(BlockPlace { pos, block });
+            });
+        }
+
+        batch
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +422,50 @@ mod tests {
         let block = planet.block_at(chunk.address([8, 8, 8]).center(&planet.shells));
         assert_eq!(block, Block::Deepslate);
         assert_eq!(stream.loaded(), initial);
+    }
+
+    #[test]
+    fn the_engine_writer_fills_a_bounded_window_and_rebases_it() {
+        let planet = Planet::new(EARTH, 1);
+        let engine = Vec3::new(0.0, 64.0, 0.0);
+        let surface = Vec3::X * planet.surface_radius_at(Vec3::X);
+        let frame = LocalFrame::anchored(surface, engine);
+        let mut writer = EngineWriter::new(frame, surface, &planet, 1, 2, 16, 48, 16);
+
+        let batch = writer.update(&planet, engine, writer.frame.to_planet(engine));
+        assert!(!batch.set.is_empty());
+        assert!(batch.clear.is_empty());
+        assert!(batch.set.len() < 200_000);
+        assert!(batch.set.iter().all(|p| {
+            p.pos[1] >= 64 - 48
+                && p.pos[1] <= 64 + 16
+                && p.pos[0].abs() <= 16
+                && p.pos[2].abs() <= 16
+        }));
+        assert!(batch.set.iter().any(|p| p.block == Block::Grass));
+
+        // A horizontal move brings only edge chunks in; it does not rebuild
+        // the whole window.
+        let east = writer.frame.east;
+        let moved = engine + east * 32.0;
+        let batch = writer.update(&planet, moved, writer.frame.to_planet(moved));
+        assert!(!batch.set.is_empty());
+        assert!(!batch.rebased);
+
+        // A large vertical move re-anchors the frame and clears the writer's
+        // old blocks, then samples the mantle through the same layer profile.
+        let deep = engine - Vec3::Y * 30_000.0;
+        let batch = writer.update(&planet, deep, writer.frame.to_planet(deep));
+        assert!(batch.rebased);
+        assert!(!batch.clear.is_empty());
+        assert!(batch.set.iter().any(|p| p.block == Block::Deepslate));
+        assert!(writer.stream.loaded() > 0);
+        assert!(writer.stream.loaded() < 100);
+
+        // Standing still after a rebase must not re-anchor every tick.
+        let batch = writer.update(&planet, deep, writer.frame.to_planet(deep));
+        assert!(!batch.rebased);
+        assert!(batch.set.is_empty());
+        assert!(batch.clear.is_empty());
     }
 }

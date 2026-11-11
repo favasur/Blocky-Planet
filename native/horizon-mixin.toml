@@ -47,3 +47,15 @@ bindings = [
   { name = "command", ty = "&str", value = "command" },
   { name = "ran", ty = "&mut bool", value = "&mut *ran" },
 ]
+
+# Engine-side chunk writer. Runs once per living server player, builds only the
+# bounded window around the player, and sends `native_edit_blocks` (API 126)
+# one bulk edit of the newly entered chunks.
+[[injection]]
+id = "stream"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_player_tick_pre"
+helper = "stream.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]

@@ -18,13 +18,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static RADIUS: AtomicU64 = AtomicU64::new(6_371_000);
 static SEED: AtomicU64 = AtomicU64::new(1);
+/// Bumped whenever the planet changes shape, so the streaming writer discards
+/// frames and chunks sampled from the old radius or seed.
+static REVISION: AtomicU64 = AtomicU64::new(0);
 
 pub fn radius() -> u64 {
     RADIUS.load(Ordering::Relaxed)
 }
 
 pub fn set_radius(r: u64) {
-    RADIUS.store(r.max(64), Ordering::Relaxed);
+    let r = r.max(64);
+    if RADIUS.swap(r, Ordering::Relaxed) != r {
+        REVISION.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 pub fn seed() -> u64 {
@@ -32,7 +38,13 @@ pub fn seed() -> u64 {
 }
 
 pub fn set_seed(s: u64) {
-    SEED.store(s, Ordering::Relaxed);
+    if SEED.swap(s, Ordering::Relaxed) != s {
+        REVISION.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub fn revision() -> u64 {
+    REVISION.load(Ordering::Relaxed)
 }
 
 pub fn planet() -> Planet {
