@@ -48,7 +48,7 @@ pub use planet::{Block, Column, Planet};
 pub use sector::{Sector, ALL_SECTORS};
 pub use shape::{BlockGeometry, BlockShape};
 pub use shell::ShellModel;
-pub use stream::{LocalWindow, WindowError, MAX_WINDOW_BLOCKS};
+pub use stream::{ChunkStream, GenerationWindow, LocalWindow, WindowError, MAX_WINDOW_BLOCKS};
 pub use vec::Vec3;
 
 /// Chunks are 16x16x16 blocks, as in the article, so chunk work is uniform

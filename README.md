@@ -175,8 +175,11 @@ centre, where the planet pulls equally in every direction — the article's
 
 `LocalFrame::at(feet)` builds `(east, up, north)` from the radial up vector.
 `to_local` / `to_planet` convert between planet space and the engine's box.
-`LocalWindow` walks the box, mapping each local block back into planet space —
-this is the function the future streaming writer calls.
+`GenerationWindow::around` builds the bounded block band (default
+17×321×17) around a moving player; `ChunkStream` tracks the spherical 16³
+chunks and returns only the chunks that enter the window after a horizontal or
+vertical move. The engine writer still has to place those chunks, but the
+planet-space scheduler and the layer sampling are in place.
 
 ## Layout
 
@@ -201,7 +204,7 @@ blocky-planet/
 The model has no dependencies, so it builds and tests anywhere:
 
 ```bash
-cargo test                 # 32 model tests
+cargo test                 # 34 model tests
 cargo run -p planet-lab    # Earth-sized planet, cross-section, timing
 cargo run -p planet-lab -- 500 7
 cargo run -p planet-lab -- 12742000 42

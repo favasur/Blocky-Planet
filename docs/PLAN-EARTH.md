@@ -153,9 +153,11 @@ atmosphere belongs in the pack.
 
 ## Milestones
 
-1. **Streaming writer** (no engine changes): fill the local window from
-   `LocalWindow`, rebase on a coarse lattice, write back edits. This turns the
-   model into a place you can stand in.
+1. **Streaming writer** (no engine changes): the model now has
+   `GenerationWindow` (bounded surface/player band) and `ChunkStream` (only
+   newly entered shell chunks after a move). The remaining work is the engine
+   side: fill those chunks into local columns, rebase on a coarse lattice, and
+   write edits back. This turns the model into a place you can stand in.
 2. **Horizon warp** (no engine changes): `world_warp` WGSL that bends the patch
    onto the sphere beyond a few hundred blocks, plus `LodPlan`-driven far
    geometry drawn through world primitives if the LOD hook stays unavailable.
