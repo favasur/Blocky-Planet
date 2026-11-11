@@ -61,12 +61,27 @@ pub struct PlanetSettings {
 ```
 
 `Planet::from_settings` builds the planet and validates the diameter, layer
-count and positive thicknesses. The **engine's Create World screen is not wired
-yet**: Horizon's released hooks expose menu/screen drawing and clicks, but a
-world-creation wizard also needs per-world persistence and a place to store the
-result before the level exists. Until that is built, the same settings are
-available through the model and `planet-lab`; `/planet radius` changes the
-active planet in-game.
+count and positive thicknesses.
 
-This is a UI task, not a planet-model task. The data model, defaults, slider
-ranges and validation are done; the screen is the remaining work.
+## In-game layout
+
+The native bundle adds a `Planet: …` row to the title's `world_create` screen
+(Horizon API 326). Its overlay follows the order above:
+
+* three body buttons (Earth-like, Mars-like, Moon-like);
+* a logarithmic diameter slider, with the current diameter in km;
+* an `Advanced layers` toggle and one thickness slider per layer;
+* `Use for next world`, which stores the profile as pending.
+
+While the save does not exist yet, the chosen profile is staged in
+`horizon-mods/.horizon-mod-data/blocky_planet/pending-settings.txt`. On the
+first server tick of the new world it is moved into
+`<save>/blocky_planet/settings.txt`. Reopening a save always reads that file
+and ignores any pending profile. The format is line based (`version`, `kind`,
+`diameter_km`, `advanced_layers`, `seed`, then `layer_n` fractions) so the
+native crate needs no serialization dependency; `PlanetSettings::decode`
+validates it again.
+
+The overlay and persistence are written against Horizon's documented screen,
+input and world-folder APIs. The native `.hnmod` still needs its first full
+game build before this is claimed as in-game verified.

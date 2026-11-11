@@ -176,12 +176,15 @@ centre, where the planet pulls equally in every direction — the article's
 `LocalFrame::at(feet)` builds `(east, up, north)` from the radial up vector.
 `to_local` / `to_planet` convert between planet space and the engine's box.
 `GenerationWindow` builds the bounded block band around a moving player;
-`ChunkStream` tracks the spherical 16³ chunks and returns only the chunks that
-enter the window after a horizontal or vertical move. `EngineWriter` maps those
-chunks to engine-local columns, emits a `WriteBatch`, and rebases the frame
-when the player moves more than 256 blocks — clearing only the blocks it
-generated. The native `player_tick` injection converts each non-empty batch to
-one `NativeBlockEdit` and calls `native_edit_blocks` (API 126).
+`ChunkStream` samples the local tangent box, so a move that crosses a cube
+edge loads the neighbouring sector instead of clamping at a seam. It returns
+both entering and leaving chunks. `EngineWriter` maps those chunks to
+engine-local columns, caches one surface-noise sample per local column, tracks
+which chunk owns each emitted block, and rebases the frame when the player
+moves more than 256 blocks. A block that loses its last owning chunk is cleared
+rather than left as a stale shell. The native `player_tick` injection converts
+each non-empty batch to one `NativeBlockEdit` and calls `native_edit_blocks`
+(API 126).
 
 ## Layout
 
@@ -195,6 +198,9 @@ blocky-planet/
 │   ├── runtime.rs             constants, selected planet, HUD text
 │   ├── hud.rs                 bottom-left diagnostics box
 │   ├── command.rs             /planet, /planet radius, /planet seed, /planet probe
+│   ├── stream.rs              player-tick chunk writer
+│   ├── settings_screen.rs     Create New World overlay drawing
+│   ├── settings_click.rs      Create New World overlay input
 │   └── planet/                the pure model (compiled into the game)
 │       └── src/{sector,shell,address,noise,planet,layers,frame,stream}.rs
 ├── tools/planet-lab/          CLI: stats, ASCII cross-section, timing
@@ -206,7 +212,7 @@ blocky-planet/
 The model has no dependencies, so it builds and tests anywhere:
 
 ```bash
-cargo test                 # 35 model tests
+cargo test                 # 40 model tests
 cargo run -p planet-lab    # Earth-sized planet, cross-section, timing
 cargo run -p planet-lab -- 500 7
 cargo run -p planet-lab -- 12742000 42
@@ -222,15 +228,23 @@ The first build downloads Rust and Horizon's source and takes 20–30 minutes;
 later builds compile only what changed. `native-build` expects a bundle folder
 (a folder with `horizon-mixin.toml`), which is `native/` here.
 
-In game (**Options → Mods → Blocky Planet** must be on), with the engine box
-anchored to the planet's `+X` surface until the streaming rebase lands:
+In game (**Options → Mods → Blocky Planet** must be on):
 
+* **Create New World** has a `Planet: …` row in its top-right corner. It opens
+  the planet type, logarithmic diameter, advanced layer sliders and a
+  `Use for next world` button built over Horizon's `world_create` screen;
+* the chosen profile is written to the new save's
+  `blocky_planet/settings.txt`, and an existing save's profile wins on reopen;
 * the bottom-left box shows the planet radius, your sector/shell/address, and
   the block you are standing in;
 * `/planet` prints the planet and your address;
 * `/planet radius 500` / `/planet radius 12742000` changes the planet size;
 * `/planet seed 42` changes the terrain;
 * `/planet probe` counts solid blocks in the 17³ local window around you.
+
+The native bundle has not been compiled against a Horizon checkout yet, so the
+screen and persistence integration are written against the documented hook
+signatures but are not claimed as in-game verified.
 
 ## Status
 
@@ -245,6 +259,11 @@ anchored to the planet's `+X` surface until the streaming rebase lands:
 * [x] bounded generation band for a solid planet; full-radius windows refused
 * [x] `EngineWriter` + native `player_tick` adapter using `native_edit_blocks`
       (written against the API; not yet compiled against a Horizon commit)
+* [x] seam-aware chunk streaming across all six cube faces and adjacent shells;
+      walking around the sphere keeps a bounded, hole-free local window
+* [x] Create New World overlay backed by `PlanetSettings`, with per-save
+      `blocky_planet/settings.txt` persistence and a pending profile for the
+      next world
 * [x] validated frustum shapes, Cartesian core tier, 1↔4 shell neighbours
 * [x] local frame + floating origin + window sampling, tested at Earth scale
 * [x] native bundle, HUD and commands written against Horizon's real hook
@@ -253,9 +272,10 @@ anchored to the planet's `+X` surface until the streaming rebase lands:
 
 **Next, and what it needs**
 
-1. **Streaming writer** — fill the local window from `LocalWindow` into real
-   chunks when the frame rebases, and write block edits back to the planet
-   store. Uses the ordinary server block helpers; no engine patch needed.
+1. **Build the native bundle** — compile the bundle against a Horizon commit,
+   then exercise the Create World overlay, world-folder persistence, seam
+   writes and rebases in-game. The API calls are written but have not yet been
+   type-checked by the game build.
 2. **Radial gravity and camera up** — Horizon's hook catalog has no gravity
    hook today, so this needs a raw-target injection into
    `horizon_client_lib::motion` (pinned to a Horizon commit), or a new upstream

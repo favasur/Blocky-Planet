@@ -275,6 +275,7 @@ pub enum SettingsError {
     BadDiameter,
     LayerCount,
     NonPositiveLayer,
+    BadFormat,
 }
 
 /// The settings a "Create world" screen collects, in the order it collects
@@ -356,6 +357,170 @@ impl PlanetSettings {
         };
         LayerProfile::from_fractions(self.kind, &fractions)
     }
+
+    /// Position of the diameter on the logarithmic Create World slider.
+    pub fn diameter_slider(&self) -> f32 {
+        let lo = MIN_DIAMETER_KM.ln();
+        let hi = MAX_DIAMETER_KM.ln();
+        (((self
+            .diameter_km
+            .clamp(MIN_DIAMETER_KM, MAX_DIAMETER_KM)
+            .ln()
+            - lo)
+            / (hi - lo))
+            .clamp(0.0, 1.0)) as f32
+    }
+
+    pub fn set_diameter_slider(&mut self, position: f32) {
+        let t = f64::from(position.clamp(0.0, 1.0));
+        let lo = MIN_DIAMETER_KM.ln();
+        let hi = MAX_DIAMETER_KM.ln();
+        self.diameter_km = (lo + t * (hi - lo)).exp();
+    }
+
+    pub fn select_kind(&mut self, kind: PlanetKind) {
+        self.kind = kind;
+        self.diameter_km = kind.default_diameter_km();
+        self.advanced_layers = false;
+        self.layer_fractions = default_fractions(kind);
+    }
+
+    /// Reset the advanced sliders to the selected body's real layers.
+    pub fn reset_layers(&mut self) {
+        self.advanced_layers = false;
+        self.layer_fractions = default_fractions(self.kind);
+    }
+
+    /// Slider position for layer `index`, from its thickness in km. The
+    /// slider ranges are the real body's ranges from the Create World design.
+    pub fn layer_slider(&self, index: usize) -> f32 {
+        let Some(&(min, max)) = self.kind.slider_ranges_km().get(index) else {
+            return 0.0;
+        };
+        let km = self.layer_km().get(index).copied().unwrap_or(min);
+        (((km - min) / (max - min).max(1e-9)).clamp(0.0, 1.0)) as f32
+    }
+
+    /// Set one advanced layer from its slider position, then normalize all
+    /// fractions so the layers still meet without a gap or an overlap.
+    pub fn set_layer_slider(&mut self, index: usize, position: f32) {
+        let Some(&(min, max)) = self.kind.slider_ranges_km().get(index) else {
+            return;
+        };
+        if !self.advanced_layers {
+            self.layer_fractions = default_fractions(self.kind);
+            self.advanced_layers = true;
+        }
+        if self.layer_fractions.len() != self.kind.layer_ids().len() {
+            self.layer_fractions = default_fractions(self.kind);
+        }
+        let km = min + f64::from(position.clamp(0.0, 1.0)) * (max - min);
+        self.layer_fractions[index] = (km / self.radius_km().max(1.0)).max(1e-6);
+        normalize(&mut self.layer_fractions);
+    }
+
+    /// Stable, human-readable persistence format. It is line based so the
+    /// native bundle needs no serialization dependency; every value is
+    /// validated again on load.
+    pub fn encode(&self) -> String {
+        let mut out = format!(
+            "version = 1\nkind = {}\ndiameter_km = {:.6}\nadvanced_layers = {}\nseed = {}\nlayer_count = {}\n",
+            kind_key(self.kind),
+            self.diameter_km,
+            self.advanced_layers,
+            self.seed,
+            self.layer_fractions.len()
+        );
+        for (i, fraction) in self.layer_fractions.iter().enumerate() {
+            out.push_str(&format!("layer_{i} = {fraction:.12}\n"));
+        }
+        out
+    }
+
+    pub fn decode(text: &str) -> Result<Self, SettingsError> {
+        let mut kind = None;
+        let mut diameter_km = None;
+        let mut advanced_layers = false;
+        let mut seed = 1u64;
+        let mut fractions = Vec::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                return Err(SettingsError::BadFormat);
+            };
+            let key = key.trim();
+            let value = value.trim();
+            match key {
+                "version" => {
+                    if value != "1" {
+                        return Err(SettingsError::BadFormat);
+                    }
+                }
+                "kind" => kind = Some(parse_kind(value)?),
+                "diameter_km" => {
+                    diameter_km = Some(value.parse().map_err(|_| SettingsError::BadFormat)?)
+                }
+                "advanced_layers" => {
+                    advanced_layers = value.parse().map_err(|_| SettingsError::BadFormat)?
+                }
+                "seed" => seed = value.parse().map_err(|_| SettingsError::BadFormat)?,
+                "layer_count" => {
+                    let _: usize = value.parse().map_err(|_| SettingsError::BadFormat)?;
+                }
+                key if key.starts_with("layer_") => {
+                    let index: usize = key[6..].parse().map_err(|_| SettingsError::BadFormat)?;
+                    if index != fractions.len() {
+                        return Err(SettingsError::BadFormat);
+                    }
+                    fractions.push(value.parse().map_err(|_| SettingsError::BadFormat)?);
+                }
+                _ => return Err(SettingsError::BadFormat),
+            }
+        }
+        let kind = kind.ok_or(SettingsError::BadFormat)?;
+        let settings = Self {
+            kind,
+            diameter_km: diameter_km.ok_or(SettingsError::BadFormat)?,
+            advanced_layers,
+            layer_fractions: fractions,
+            seed,
+        };
+        settings.validate()?;
+        if settings.layer_fractions.len() != kind.layer_ids().len() {
+            return Err(SettingsError::LayerCount);
+        }
+        Ok(settings)
+    }
+}
+
+fn kind_key(kind: PlanetKind) -> &'static str {
+    match kind {
+        PlanetKind::EarthLike => "earth",
+        PlanetKind::MarsLike => "mars",
+        PlanetKind::MoonLike => "moon",
+    }
+}
+
+fn parse_kind(value: &str) -> Result<PlanetKind, SettingsError> {
+    match value {
+        "earth" => Ok(PlanetKind::EarthLike),
+        "mars" => Ok(PlanetKind::MarsLike),
+        "moon" => Ok(PlanetKind::MoonLike),
+        _ => Err(SettingsError::BadFormat),
+    }
+}
+
+fn normalize(fractions: &mut [f64]) {
+    let sum: f64 = fractions.iter().filter(|f| f.is_finite()).sum();
+    if sum <= 0.0 {
+        return;
+    }
+    for fraction in fractions {
+        *fraction = (*fraction).max(0.0) / sum;
+    }
 }
 
 #[cfg(test)]
@@ -417,6 +582,45 @@ mod tests {
                 (profile.layers.iter().map(|l| l.volume_share()).sum::<f64>() - 1.0).abs() < 1e-9
             );
         }
+    }
+
+    #[test]
+    fn settings_round_trip_through_the_save_format() {
+        let settings = PlanetSettings {
+            advanced_layers: true,
+            layer_fractions: vec![0.05, 0.45, 0.30, 0.20],
+            seed: 42,
+            ..PlanetSettings::earth_default()
+        };
+        let decoded = PlanetSettings::decode(&settings.encode()).unwrap();
+        assert_eq!(decoded.kind, settings.kind);
+        assert!((decoded.diameter_km - settings.diameter_km).abs() < 1e-6);
+        assert!(decoded.advanced_layers);
+        assert_eq!(decoded.seed, 42);
+        assert_eq!(decoded.layer_fractions.len(), 4);
+        assert!((decoded.layer_fractions[1] - 0.45).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sliders_are_reversible_and_layer_edits_stay_normalized() {
+        let mut settings = PlanetSettings::earth_default();
+        for position in [0.0, 0.25, 0.5, 1.0] {
+            settings.set_diameter_slider(position);
+            assert!((settings.diameter_slider() - position).abs() < 1e-6);
+        }
+        settings.set_layer_slider(0, 0.8);
+        assert!(settings.advanced_layers);
+        let sum: f64 = settings.layer_fractions.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-9);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn a_broken_settings_file_is_refused() {
+        assert_eq!(
+            PlanetSettings::decode("kind = earth\ndiameter_km = nope\n"),
+            Err(SettingsError::BadFormat)
+        );
     }
 
     #[test]

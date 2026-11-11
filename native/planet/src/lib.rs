@@ -49,8 +49,8 @@ pub use sector::{Sector, ALL_SECTORS};
 pub use shape::{BlockGeometry, BlockShape};
 pub use shell::ShellModel;
 pub use stream::{
-    BlockPlace, ChunkStream, EngineWriter, GenerationWindow, LocalWindow, WindowError, WriteBatch,
-    MAX_WINDOW_BLOCKS,
+    BlockPlace, ChunkStream, EngineWriter, GenerationWindow, LocalWindow, StreamDelta, WindowError,
+    WriteBatch, MAX_WINDOW_BLOCKS,
 };
 pub use vec::Vec3;
 

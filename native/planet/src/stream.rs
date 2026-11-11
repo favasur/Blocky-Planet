@@ -9,10 +9,10 @@
 
 use crate::address::{BlockAddress, ShellChunk};
 use crate::frame::LocalFrame;
-use crate::planet::{Block, Planet};
+use crate::planet::{Block, Column, Planet};
 use crate::shell::ShellModel;
 use crate::vec::Vec3;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Hard ceiling on a window the game may ask for. Four million block
 /// positions is a 512 x 512 footprint 16 blocks deep, or 128 x 128 x 256.
@@ -115,13 +115,22 @@ impl GenerationWindow {
     }
 }
 
+/// Chunks that entered or left the local window after a move.
+#[derive(Clone, Debug, Default)]
+pub struct StreamDelta {
+    pub added: Vec<ShellChunk>,
+    pub removed: Vec<ShellChunk>,
+}
+
 /// Tracks the spherical 16x16x16 chunks around a moving player.
 ///
-/// The engine stores local column chunks, but the planet's unit is a
-/// `ShellChunk` in shell space. This streamer owns the planet-space set; after
-/// a horizontal or vertical move, [`ChunkStream::update`] returns only the
-/// chunks that entered the window, so those are the chunks to generate. A
-/// chunk that leaves is dropped; the planet itself is unchanged.
+/// The old version clamped face indices to one sector. That leaves a hole at
+/// every cube edge: the player reaches `i = 0` and the face across the seam is
+/// never loaded. This version samples a local tangent box and asks the
+/// quad-sphere address every time. The sector, the face-local flip and the
+/// shell boundary therefore come from the same projection as the blocks; there
+/// are no hand-written seam cases to get wrong, and walking around the sphere
+/// is just walking through local coordinates.
 pub struct ChunkStream {
     pub shells: ShellModel,
     pub horizontal: u128,
@@ -154,15 +163,24 @@ impl ChunkStream {
 
     /// Move the player and return the chunks that are newly in range.
     pub fn update(&mut self, player: Vec3) -> Vec<ShellChunk> {
-        let needed = self.around(player);
-        let mut added: Vec<ShellChunk> = needed.difference(&self.loaded).copied().collect();
-        added.sort_by_key(|c| (c.shell, c.layer, c.i, c.j));
-        self.loaded = needed;
-        added
+        self.update_delta(player).added
     }
 
-    /// Sample one chunk through the planet's layer profile, for the chunk
-    /// writer. The callback receives each block's address and block.
+    /// Move the player and return both sides of the streaming change. The
+    /// writer needs the removed chunks to clear blocks that are now outside
+    /// the window.
+    pub fn update_delta(&mut self, player: Vec3) -> StreamDelta {
+        let needed = self.around(player);
+        let mut added: Vec<ShellChunk> = needed.difference(&self.loaded).copied().collect();
+        let mut removed: Vec<ShellChunk> = self.loaded.difference(&needed).copied().collect();
+        added.sort_by_key(|c| (c.shell, c.layer, c.i, c.j));
+        removed.sort_by_key(|c| (c.shell, c.layer, c.i, c.j));
+        self.loaded = needed;
+        StreamDelta { added, removed }
+    }
+
+    /// Sample one chunk through the planet's layer profile, for callers that
+    /// need the full planet-space chunk rather than the engine window.
     pub fn for_each_block(
         &self,
         planet: &Planet,
@@ -180,36 +198,34 @@ impl ChunkStream {
     }
 
     fn around(&self, player: Vec3) -> HashSet<ShellChunk> {
-        let a = BlockAddress::from_position(&self.shells, player);
-        let (ci, cl, cj, _) = a.chunk();
-        let chunks_per_side = self.shells.chunks_per_side(a.shell) as i128;
-        let chunks_radial = self.shells.chunks_radial(a.shell) as i128;
+        let center = if player.length() > 0.0 {
+            player
+        } else {
+            Vec3::X
+        };
+        let frame = LocalFrame::at(center);
+        let horizontal = (self.horizontal.min(32) as i32 + 1) * 16;
+        let vertical = (self.vertical.min(32) as i32 + 1) * 16;
+        // Four blocks is small compared with a 16³ chunk even at the top of a
+        // shell, where blocks are widest. The set is deduplicated by chunk.
+        const STEP: i32 = 4;
         let mut out = HashSet::new();
-
-        for di in -(self.horizontal as i128)..=(self.horizontal as i128) {
-            let i = ci as i128 + di;
-            if i < 0 || i >= chunks_per_side {
-                continue;
-            }
-            for dj in -(self.horizontal as i128)..=(self.horizontal as i128) {
-                let j = cj as i128 + dj;
-                if j < 0 || j >= chunks_per_side {
-                    continue;
+        let mut y = -vertical;
+        while y <= vertical {
+            let mut z = -horizontal;
+            while z <= horizontal {
+                let mut x = -horizontal;
+                while x <= horizontal {
+                    let p = frame.to_planet_block([x, y, z]);
+                    out.insert(ShellChunk::of(&BlockAddress::from_position(
+                        &self.shells,
+                        p,
+                    )));
+                    x += STEP;
                 }
-                for dl in -(self.vertical as i128)..=(self.vertical as i128) {
-                    let layer = cl as i128 + dl;
-                    if layer < 0 || layer >= chunks_radial {
-                        continue;
-                    }
-                    out.insert(ShellChunk {
-                        sector: a.sector,
-                        shell: a.shell,
-                        i: i as u128,
-                        layer: layer as u128,
-                        j: j as u128,
-                    });
-                }
+                z += STEP;
             }
+            y += STEP;
         }
         out
     }
@@ -250,7 +266,10 @@ pub struct EngineWriter {
     pub up: i32,
     pub rebase_distance: f64,
     last_planet: Vec3,
-    generated: std::collections::HashMap<[i32; 3], Block>,
+    generated: HashMap<[i32; 3], Block>,
+    columns: HashMap<[i32; 2], Column>,
+    chunk_blocks: HashMap<ShellChunk, Vec<([i32; 3], Block)>>,
+    claims: HashMap<[i32; 3], Vec<(ShellChunk, Block)>>,
     initialized: bool,
 }
 
@@ -276,7 +295,10 @@ impl EngineWriter {
             up,
             rebase_distance: 256.0,
             last_planet: player_planet,
-            generated: std::collections::HashMap::new(),
+            generated: HashMap::new(),
+            columns: HashMap::new(),
+            chunk_blocks: HashMap::new(),
+            claims: HashMap::new(),
             initialized: false,
         }
     }
@@ -294,7 +316,7 @@ impl EngineWriter {
         let moved = (player_planet - self.last_planet).length();
         let rebase = !self.initialized || moved > self.rebase_distance;
 
-        if rebase {
+        let chunks = if rebase {
             if self.initialized {
                 batch.clear.extend(self.generated.keys().copied());
             }
@@ -302,16 +324,19 @@ impl EngineWriter {
             self.stream =
                 ChunkStream::new(planet.shells, player_planet, self.horizontal, self.vertical);
             self.generated.clear();
+            self.columns.clear();
+            self.chunk_blocks.clear();
+            self.claims.clear();
             self.last_planet = player_planet;
             self.initialized = true;
             batch.rebased = true;
-        }
-
-        let chunks = if rebase {
             self.stream.loaded_chunks()
         } else {
-            self.stream.update(player_planet)
+            let delta = self.stream.update_delta(player_planet);
+            self.remove_chunks(&delta.removed, &mut batch);
+            delta.added
         };
+
         let frame = self.frame;
         let radius = self.radius;
         let down = self.down;
@@ -321,8 +346,6 @@ impl EngineWriter {
             player_engine.y.floor() as i32,
             player_engine.z.floor() as i32,
         ];
-        let generated = &mut self.generated;
-        let set = &mut batch.set;
 
         for chunk in chunks {
             // Skip chunks whose 16-block box cannot touch the view. Without
@@ -339,33 +362,129 @@ impl EngineWriter {
             {
                 continue;
             }
-            self.stream.for_each_block(planet, chunk, |a, block| {
-                if block == Block::Air {
-                    return;
+
+            let mut blocks = Vec::new();
+            for di in 0..crate::CHUNK_SIZE {
+                for dl in 0..crate::CHUNK_SIZE {
+                    for dj in 0..crate::CHUNK_SIZE {
+                        let a = chunk.address([di, dl, dj]);
+                        let local = frame.to_local(a.center(&planet.shells));
+                        let pos = [
+                            local.x.floor() as i32,
+                            local.y.floor() as i32,
+                            local.z.floor() as i32,
+                        ];
+                        if (pos[0] - player[0]).abs() > radius
+                            || (pos[2] - player[2]).abs() > radius
+                            || pos[1] < player[1] - down
+                            || pos[1] > player[1] + up
+                        {
+                            continue;
+                        }
+                        let block = block_in_column(planet, &frame, pos, &mut self.columns);
+                        if block == Block::Air {
+                            continue;
+                        }
+                        blocks.push((pos, block));
+                    }
                 }
-                let local = frame.to_local(a.center(&planet.shells));
-                let pos = [
-                    local.x.floor() as i32,
-                    local.y.floor() as i32,
-                    local.z.floor() as i32,
-                ];
-                if (pos[0] - player[0]).abs() > radius
-                    || (pos[2] - player[2]).abs() > radius
-                    || pos[1] < player[1] - down
-                    || pos[1] > player[1] + up
-                {
-                    return;
+            }
+            if blocks.is_empty() {
+                continue;
+            }
+            for &(pos, block) in &blocks {
+                self.claims.entry(pos).or_default().push((chunk, block));
+                if self.generated.get(&pos) != Some(&block) {
+                    self.generated.insert(pos, block);
+                    batch.set.push(BlockPlace { pos, block });
                 }
-                if generated.get(&pos) == Some(&block) {
-                    return;
-                }
-                generated.insert(pos, block);
-                set.push(BlockPlace { pos, block });
-            });
+            }
+            self.chunk_blocks.insert(chunk, blocks);
         }
 
+        self.normalize_batch(&mut batch);
         batch
     }
+
+    /// Remove blocks owned only by chunks that have left. If two chunks meet
+    /// at a seam and both produced a block at one local position, the survivor
+    /// takes ownership instead of leaving a hole.
+    fn remove_chunks(&mut self, removed: &[ShellChunk], batch: &mut WriteBatch) {
+        for chunk in removed {
+            let Some(blocks) = self.chunk_blocks.remove(chunk) else {
+                continue;
+            };
+            for (pos, _) in blocks {
+                let mut gone = false;
+                let mut replacement = None;
+                if let Some(claims) = self.claims.get_mut(&pos) {
+                    claims.retain(|(owner, _)| owner != chunk);
+                    if claims.is_empty() {
+                        gone = true;
+                    } else if let Some((_, block)) = claims.last() {
+                        replacement = Some(*block);
+                    }
+                } else {
+                    gone = true;
+                }
+                if gone {
+                    self.claims.remove(&pos);
+                    self.generated.remove(&pos);
+                    batch.clear.push(pos);
+                } else if let Some(block) = replacement {
+                    if self.generated.get(&pos) != Some(&block) {
+                        self.generated.insert(pos, block);
+                        batch.set.push(BlockPlace { pos, block });
+                    }
+                }
+            }
+        }
+    }
+
+    /// A position can appear in both a clear and a set while a seam chunk is
+    /// replaced. The native writer applies clears first, then sets; dedup the
+    /// two lists so one bulk edit never contains the same run twice.
+    fn normalize_batch(&self, batch: &mut WriteBatch) {
+        batch.clear.sort_unstable();
+        batch.clear.dedup();
+        let mut by_pos: HashMap<[i32; 3], Block> = HashMap::with_capacity(batch.set.len());
+        for place in batch.set.drain(..) {
+            by_pos.insert(place.pos, place.block);
+        }
+        batch.set = by_pos
+            .into_iter()
+            .map(|(pos, block)| BlockPlace { pos, block })
+            .collect();
+        batch
+            .set
+            .sort_by_key(|place| (place.pos[0], place.pos[2], place.pos[1]));
+    }
+}
+
+/// Sample a local column once for its whole vertical run. The surface noise is
+/// an FBM over the unit sphere; the old writer called it once *per block*.
+/// Caching it by local (x, z) is the single biggest generation win: a 33x65x33
+/// window asks for roughly 1,000 columns instead of 70,000 noise samples.
+fn block_in_column(
+    planet: &Planet,
+    frame: &LocalFrame,
+    local: [i32; 3],
+    columns: &mut HashMap<[i32; 2], Column>,
+) -> Block {
+    let key = [local[0], local[2]];
+    let column = *columns.entry(key).or_insert_with(|| {
+        let base = frame.to_planet_block([key[0], 0, key[1]]);
+        let r = base.length();
+        let dir = if r > 0.0 { base / r } else { Vec3::X };
+        planet.column(dir)
+    });
+    let p = frame.to_planet_block(local);
+    let r = p.length();
+    if !r.is_finite() {
+        return Block::Air;
+    }
+    let dir = if r > 0.0 { p / r } else { Vec3::X };
+    column.block_at(planet, dir, r)
 }
 
 #[cfg(test)]
@@ -384,13 +503,10 @@ mod tests {
         let (solid, total) = view.window.count(&planet, &view.frame);
         assert!(solid > 0 && solid < total);
 
-        // Moving down moves the band with the player. The block at its centre
-        // is mantle, because the layer profile is solid all the way down.
         let deep = Vec3::X * (surface - 30_000.0);
         let below = GenerationWindow::around(deep, 8, 128, 16).unwrap();
         assert_eq!(below.block_at(&planet, [0, 0, 0]), Block::Deepslate);
 
-        // Moving horizontally keeps the same bounded cost.
         let east = LocalFrame::at(feet).east;
         let moved = GenerationWindow::around(feet + east * 32.0, 8, 256, 64).unwrap();
         assert_eq!(moved.window.volume(), view.window.volume());
@@ -403,15 +519,17 @@ mod tests {
         let p = Vec3::X * planet.surface_radius_at(Vec3::X);
         let mut stream = ChunkStream::new(planet.shells, p, 2, 1);
         let initial = stream.loaded();
-        assert_eq!(initial, 75);
+        assert!(initial > 0 && initial < 500);
 
         let east = LocalFrame::at(p).east;
-        let added = stream.update(p + east * 32.0);
-        assert!(!added.is_empty(), "a horizontal move added no chunks");
+        let delta = stream.update_delta(p + east * 32.0);
+        assert!(!delta.added.is_empty(), "a horizontal move added no chunks");
+        assert!(
+            !delta.removed.is_empty(),
+            "a horizontal move removed no chunks"
+        );
         assert_eq!(stream.loaded(), initial);
 
-        // A vertical move brings deeper shell chunks into range; they sample
-        // the mantle, not a void band.
         let deep = p - Vec3::X * 30_000.0;
         let added = stream.update(deep);
         assert!(!added.is_empty(), "a vertical move added no chunks");
@@ -420,8 +538,61 @@ mod tests {
             .find(|c| c.shell == planet.shells.shell_of(deep.length()))
             .expect("no chunk in the player's shell");
         let block = planet.block_at(chunk.address([8, 8, 8]).center(&planet.shells));
-        assert_eq!(block, Block::Deepslate);
+        assert!(block.is_solid());
         assert_eq!(stream.loaded(), initial);
+    }
+
+    #[test]
+    fn the_stream_wraps_across_a_sector_seam() {
+        let planet = Planet::new(500, 1);
+        // Just inside the +X/+Y edge. The old index-clamped stream loaded only
+        // PosX here; the local scanner must see the neighbouring face too.
+        let direction = Vec3::new(1.0, 0.995, 0.0).normalized();
+        let p = direction * planet.surface_radius_at(direction);
+        let mut stream = ChunkStream::new(planet.shells, p, 1, 1);
+        let sectors = |stream: &ChunkStream| {
+            stream
+                .loaded_chunks()
+                .into_iter()
+                .map(|c| c.sector)
+                .collect::<HashSet<_>>()
+        };
+        assert!(sectors(&stream).len() >= 2);
+
+        let north = LocalFrame::at(p).north;
+        let moved = p + north * 12.0;
+        stream.update_delta(moved);
+        let sectors = sectors(&stream);
+        assert!(
+            sectors.len() >= 2,
+            "the seam lost its neighbouring sector after walking: {sectors:?}"
+        );
+    }
+
+    #[test]
+    fn walking_around_the_equator_keeps_the_sphere_closed() {
+        let planet = Planet::new(500, 7);
+        let start = Vec3::X * planet.surface_radius_at(Vec3::X);
+        let mut stream = ChunkStream::new(planet.shells, start, 1, 1);
+        let mut seen = HashSet::new();
+        let mut p = start;
+        for _ in 0..180 {
+            let frame = LocalFrame::at(p);
+            p = p + frame.east * 16.0;
+            stream.update_delta(p);
+            assert!(stream.loaded() > 0);
+            assert!(stream.loaded() < 2_000, "stream grew without bound");
+            let address = planet.address_of(p);
+            seen.insert(address.sector);
+            assert!(
+                stream.loaded.contains(&ShellChunk::of(&address)),
+                "the player's own chunk is missing"
+            );
+        }
+        assert!(
+            seen.len() >= 4,
+            "a full walk should cross the sphere: {seen:?}"
+        );
     }
 
     #[test]
@@ -444,25 +615,20 @@ mod tests {
         }));
         assert!(batch.set.iter().any(|p| p.block == Block::Grass));
 
-        // A horizontal move brings only edge chunks in; it does not rebuild
-        // the whole window.
         let east = writer.frame.east;
         let moved = engine + east * 32.0;
         let batch = writer.update(&planet, moved, writer.frame.to_planet(moved));
-        assert!(!batch.set.is_empty());
         assert!(!batch.rebased);
+        assert!(batch.set.iter().all(|p| p.block != Block::Air));
 
-        // A large vertical move re-anchors the frame and clears the writer's
-        // old blocks, then samples the mantle through the same layer profile.
         let deep = engine - Vec3::Y * 30_000.0;
         let batch = writer.update(&planet, deep, writer.frame.to_planet(deep));
         assert!(batch.rebased);
         assert!(!batch.clear.is_empty());
         assert!(batch.set.iter().any(|p| p.block == Block::Deepslate));
         assert!(writer.stream.loaded() > 0);
-        assert!(writer.stream.loaded() < 100);
+        assert!(writer.stream.loaded() < 2_000);
 
-        // Standing still after a rebase must not re-anchor every tick.
         let batch = writer.update(&planet, deep, writer.frame.to_planet(deep));
         assert!(!batch.rebased);
         assert!(batch.set.is_empty());

@@ -121,11 +121,8 @@ fn edit_for(batch: &WriteBatch) -> NativeBlockEdit {
 
     // Clear first, then place, so a rebase that reuses a local position is not
     // left as air. Both lists are grouped independently.
-    let mut clear: Vec<([i32; 3], Block)> = batch
-        .clear
-        .iter()
-        .map(|pos| (*pos, Block::Air))
-        .collect();
+    let mut clear: Vec<([i32; 3], Block)> =
+        batch.clear.iter().map(|pos| (*pos, Block::Air)).collect();
     push_runs(&mut clear, &mut palette, &mut runs);
 
     let mut set: Vec<([i32; 3], Block)> = batch
@@ -151,6 +148,10 @@ fn blocky_planet_stream(game: &mut crate::game::Game<'_>) {
     if !game.native_on(m::ID) {
         return;
     }
+    // The world's profile is written by the Create World overlay before the
+    // save exists. Load it on the first server tick; every later tick is a
+    // cheap path comparison.
+    m::ensure_world_loaded(game.native_world_dir(), game.native_instance_dir());
     let Some(player) = game.native_acting_player() else {
         return;
     };
@@ -165,16 +166,11 @@ fn blocky_planet_stream(game: &mut crate::game::Game<'_>) {
         let mut map = writers()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let entry = map.entry(player.uuid).or_insert_with(|| {
-            new_entry(&planet, engine, player.dimension.clone(), revision)
-        });
+        let entry = map
+            .entry(player.uuid)
+            .or_insert_with(|| new_entry(&planet, engine, player.dimension.clone(), revision));
         if entry.revision != revision || entry.dimension != player.dimension {
-            *entry = new_entry(
-                &planet,
-                engine,
-                player.dimension.clone(),
-                revision,
-            );
+            *entry = new_entry(&planet, engine, player.dimension.clone(), revision);
         }
         let player_planet = entry.writer.frame.to_planet(engine);
         (

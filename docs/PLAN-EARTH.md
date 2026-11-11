@@ -153,12 +153,18 @@ atmosphere belongs in the pack.
 
 ## Milestones
 
-1. **Streaming writer**: `GenerationWindow`, `ChunkStream` and `EngineWriter`
-   are in the model, and `native/stream.rs` is injected into the server's
-   player tick: it converts new chunks to one `native_edit_blocks` (API 126)
-   edit. The remaining work is compiling and testing that adapter against a
-   Horizon commit, including chunk-load boundaries and rebasing across a
-   sector seam.
+1. **Streaming writer and world setup**: `GenerationWindow`, `ChunkStream`
+   and `EngineWriter` are in the model, and `native/stream.rs` is injected into
+   the server's player tick. The stream samples local columns across all six
+   cube faces, so a sector edge is just another coordinate; it tracks removed
+   chunks as well as added ones, and each block remembers its owning chunk so
+   a seam transition cannot leave stale terrain. Column noise is cached once
+   per local column (the lab measures ~40x fewer samples on a 16x16x64 chunk).
+   The remaining work is compiling and testing the adapter against a Horizon
+   commit, including chunk-load boundaries in-game.
+   Create New World uses the same `PlanetSettings`: a `world_create` overlay
+   writes a pending profile, and the first server tick stores it in
+   `<save>/blocky_planet/settings.txt` and applies it to the planet.
 2. **Horizon warp** (no engine changes): `world_warp` WGSL that bends the patch
    onto the sphere beyond a few hundred blocks, plus `LodPlan`-driven far
    geometry drawn through world primitives if the LOD hook stays unavailable.
