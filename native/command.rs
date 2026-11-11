@@ -69,6 +69,14 @@ fn blocky_planet_command(game: &mut crate::game::Game<'_>, command: &str, ran: &
                     "Local 17x17x17 window: {solid}/{total} solid ({:.0}%)",
                     solid as f64 / total as f64 * 100.0
                 ));
+                let under = frame.to_planet_block([0, -1, 0]);
+                match planet.geometry_at(under) {
+                    Some(geometry) => game.native_chat(&format!(
+                        "Block under you: {}",
+                        geometry.describe()
+                    )),
+                    None => game.native_chat("No solid block under you"),
+                }
             }
             None => game.native_chat("Not in a world"),
         },

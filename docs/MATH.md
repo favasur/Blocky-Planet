@@ -65,6 +65,64 @@ article accepts that trade for edge alignment. Because the index grows like
 `log₂(r/L₀)`, the shell count for 9e18 blocks is still under 60, and all
 arithmetic is `u128`/`f64`, so nothing overflows.
 
+## 2.1 Block shape at depth, and the core
+
+A shell block is the spherical cell
+
+```
+inner = inner(k) + layer        (one layer tall)
+outer = inner + 1
+angle: [u0, u0 + 2/N_k] x [v0, v0 + 2/N_k]
+```
+
+Its eight corners are `sector.position(u, v, r)` for `u ∈ {u0,u1}`,
+`v ∈ {v0,v1}`, `r ∈ {inner,outer}`. Its width is the chord between the two
+inner corners, so:
+
+```
+width(r) ≈ (π/2 · r) / N_k
+aspect   = outer / inner ≤ 3      (worst case: shell 1, 16 → 48)
+```
+
+From shell 2 outward the aspect stays below 2.4. A block's height is always one
+layer; only width changes, which is the article's "constant block height".
+
+Accepted shapes must satisfy
+
+```
+all corners finite
+min edge ≥ 0.1
+max edge / min edge ≤ 3.5
+outer > inner
+```
+
+Anything else returns `None` — the engine draws and collides nothing there.
+
+**The centre.** Shell 0 starts at `r = 0`, and every cell there is a wedge of
+zero width. The model therefore does not use the shell grid below
+`MIN_SHELL_RADIUS = 16`: that region is a Cartesian `1x1x1` grid in planet
+space (a cube tier), addressed by `CoreAddress`. There is no division by a
+zero radius and no zero-width cell. On top of that, the planet is hollow below
+`0.58 R`, so the degenerate central shells hold no solid blocks at all.
+
+For an Earth-sized planet `0.58 R ≈ 3,695,000` lies in shell 17, whose
+resolution is 3,276,800 per side. The chord-based width of that block is
+**2.26 blocks** (aspect 2.26), which `planet-lab` prints directly. Across the
+sizes tested the hollow wall's blocks are 1.45–2.26 blocks wide, so digging to
+the core never reaches a paper-thin cell.
+
+**Neighbour topology.** At the top layer of shell `k`, the next shell has twice
+the resolution, so one block maps to the 2x2 group
+
+```
+(i, j) → (2i, 2j), (2i+1, 2j), (2i, 2j+1), (2i+1, 2j+1)   at layer 0, shell k+1
+```
+
+and the inverse collapses four to one. Structures must be placed within one
+shell; the article's shrinking roof is this factor. At a sector corner three
+faces meet; the dominant-axis tie-break gives the point to exactly one sector,
+so a block cannot be written three times.
+
 ## 3. Address
 
 ```

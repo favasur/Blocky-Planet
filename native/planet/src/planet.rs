@@ -2,9 +2,15 @@
 //!
 //! A radius is an `f64` over a `u64` input, so a planet may be a 500-block
 //! moon or 9.2e18 blocks across; the shell model only needs ~log2(r) shells.
+//!
+//! Terrain amplitude and sea depth scale with the radius instead of being
+//! constants. With a fixed +-64-block amplitude a 64-block planet had its
+//! "surface" below its own centre, which is exactly the kind of number that
+//! turns into broken geometry further down the line.
 
-use crate::address::BlockAddress;
+use crate::address::{AddressSpace, BlockAddress, CoreAddress};
 use crate::noise;
+use crate::shape::{BlockGeometry, BlockShape, MIN_SHELL_RADIUS};
 use crate::shell::ShellModel;
 use crate::vec::Vec3;
 
@@ -59,12 +65,15 @@ pub struct Planet {
 
 impl Planet {
     pub fn new(radius: u64, seed: u64) -> Self {
+        let r = radius as f64;
         Self {
-            radius: radius as f64,
+            radius: r,
             seed,
             shells: ShellModel::default(),
-            terrain_amplitude: 64.0,
-            sea_level_drop: 10.0,
+            // Relative, with an absolute ceiling so Earth's terrain stays
+            // Minecraft-sized rather than continental.
+            terrain_amplitude: (r * 0.01).clamp(2.0, 64.0),
+            sea_level_drop: (r * 0.002).clamp(1.0, 10.0),
         }
     }
 
@@ -80,7 +89,7 @@ impl Planet {
     /// The block at a planet-space point. `p` may be at any distance.
     pub fn block_at(&self, p: Vec3) -> Block {
         let r = p.length();
-        if r == 0.0 {
+        if r == 0.0 || !r.is_finite() {
             return Block::Air;
         }
         let dir = p / r;
@@ -105,7 +114,7 @@ impl Planet {
 
         // The Nether as a spherical ring deep inside the planet.
         let ring_inner = self.radius * 0.70;
-        let ring_outer = ring_inner + (self.radius * 0.02).max(32.0);
+        let ring_outer = ring_inner + (self.radius * 0.02).clamp(2.0, 256.0);
         if r >= ring_inner && r <= ring_outer {
             let n = noise::fbm(dir * 12.0, self.seed ^ NETHER_SALT, 3);
             return if n > 0.45 {
@@ -130,6 +139,36 @@ impl Planet {
     /// The block's address (sector, shell, chunk, block).
     pub fn address_of(&self, p: Vec3) -> BlockAddress {
         BlockAddress::from_position(&self.shells, p)
+    }
+
+    /// Shell address above the core radius, Cartesian core address below it.
+    pub fn address_space_of(&self, p: Vec3) -> AddressSpace {
+        if p.length() < MIN_SHELL_RADIUS {
+            AddressSpace::Core(CoreAddress::from_position(p))
+        } else {
+            AddressSpace::Shell(BlockAddress::from_position(&self.shells, p))
+        }
+    }
+
+    /// Geometry the game may use for a solid block, or `None` when the block is
+    /// not solid, is outside the planet, or its shape fails validation.
+    ///
+    /// This is the single gate that keeps depth math out of collision and
+    /// rendering: nothing unvalidated is ever returned.
+    pub fn geometry_at(&self, p: Vec3) -> Option<BlockGeometry> {
+        if !self.block_at(p).is_solid() {
+            return None;
+        }
+        let r = p.length();
+        if r < MIN_SHELL_RADIUS {
+            let min = CoreAddress::from_position(p).min();
+            return Some(BlockGeometry::CoreCube {
+                min,
+                max: min + Vec3::splat(1.0),
+            });
+        }
+        let shape = BlockShape::from_address(&self.shells, &self.address_of(p));
+        shape.is_valid().then_some(BlockGeometry::Frustum(shape))
     }
 
     /// How many shells this planet uses.

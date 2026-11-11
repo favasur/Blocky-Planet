@@ -91,6 +91,42 @@ layer, so blocks stay roughly cubic. The 2× ratio is what lets chunk edges line
 up; the price is that blocks at the top of a shell are up to twice as wide as at
 the bottom, which the article accepts.
 
+### Blocks at depth — the shape contract
+
+A block is not a cube: it is a spherical **frustum**. Its bottom face sits at
+`r_inner` and its top at `r_inner + 1`, so its width grows with radius and its
+side faces are trapezoids. Storing the eight corners (not a cube size) is what
+makes rendering and collision exact. Four invariants keep that math from
+reaching the game as a crash or a NaN:
+
+1. **Bounded aspect ratio.** Shells double thickness and resolution together,
+   so `r_outer / r_inner` is at most 3 (shell 1) and about 2.3 from shell 2
+   outward. A shape whose longest edge over shortest edge exceeds `3.5` is
+   rejected.
+2. **Minimum edge.** A shape narrower than `0.1` block anywhere is rejected —
+   no zero-width wedge is ever handed to the mesher or to collision.
+3. **Cartesian core tier.** Below `r = 16` the shell grid is not used at all.
+   Those cells meet at radius zero and collapse; inside instead is a plain
+   `1x1x1` cube grid in planet space. No division by a zero radius.
+4. **Hollow interior.** The planet is hollow below `0.58 R`, with bedrock at
+   `0.58–0.60 R`, so the degenerate inner shells contain no solid blocks to
+   draw in the first place. Solid blocks begin where the wall's blocks are
+   1.4–2.3 blocks wide across the sizes tested (1.48 at r=64, 1.45 at r=500,
+   2.26 at Earth size), so digging to the core never reaches paper-thin cells.
+
+`Planet::geometry_at` is the single gate: it returns a validated frustum, a
+core cube, or `None`. Nothing unvalidated leaves the model. The article's two
+topology breaks are modelled too: at a shell boundary one block has **four**
+neighbours above (and four map back to one below) — `BlockAddress::above` /
+`below` — and a structure must choose a shell before placement, or its roof
+shrinks by that 2x2 factor. Sector corners are resolved by a fixed dominant-axis
+tie-break, so a corner block belongs to exactly one sector rather than being
+written by three.
+
+Beyond `2^53` blocks, `f64` can no longer resolve a single block. The model
+does not pretend otherwise: shape validation fails and `geometry_at` returns
+`None` instead of emitting NaN geometry.
+
 ### Block address
 
 `sector → shell → chunk (16³) → block`, e.g. Earth's `+X` surface at shell 18.
@@ -148,7 +184,7 @@ blocky-planet/
 The model has no dependencies, so it builds and tests anywhere:
 
 ```bash
-cargo test                 # 12 model tests
+cargo test                 # 17 model tests
 cargo run -p planet-lab    # Earth-sized planet, cross-section, timing
 cargo run -p planet-lab -- 500 7
 cargo run -p planet-lab -- 12742000 42
@@ -183,6 +219,7 @@ anchored to the planet's `+X` surface until the streaming rebase lands:
 * [x] doubling shells that do not overflow (the Java version's fatal bug)
 * [x] block addressing and chunk decomposition
 * [x] seamless 3D terrain, water, deepslate, Nether ring, hollow bedrock core
+* [x] validated frustum shapes, Cartesian core tier, 1↔4 shell neighbours
 * [x] local frame + floating origin + window sampling, tested at Earth scale
 * [x] native bundle, HUD and commands written against Horizon's real hook
       signatures (copied from `coords-hud`); not yet compiled against a

@@ -66,6 +66,17 @@ fn main() {
 
     // Six sectors, each sampled at its centre: the same surface rules apply,
     // with no pole and no seam in the middle of a face.
+    let hollow = planet.radius * 0.58;
+    let wall = Vec3::X * hollow;
+    println!(
+        "  block at 0.58R    {}  (shell {}, width at the hollow wall)",
+        match planet.geometry_at(wall) {
+            Some(g) => g.describe(),
+            None => "no solid geometry".to_string(),
+        },
+        planet.address_of(wall).shell
+    );
+
     print!("  sector surfaces  ");
     for s in ALL_SECTORS {
         let dir = s.position(0.0, 0.0, 1.0);

@@ -24,14 +24,16 @@ pub mod frame;
 pub mod noise;
 pub mod planet;
 pub mod sector;
+pub mod shape;
 pub mod shell;
 pub mod stream;
 pub mod vec;
 
-pub use address::BlockAddress;
+pub use address::{AddressSpace, BlockAddress, CoreAddress};
 pub use frame::LocalFrame;
 pub use planet::{Block, Planet};
 pub use sector::{Sector, ALL_SECTORS};
+pub use shape::{BlockGeometry, BlockShape};
 pub use shell::ShellModel;
 pub use stream::LocalWindow;
 pub use vec::Vec3;
@@ -230,5 +232,97 @@ mod tests {
         assert!((planet.gravity_at(planet.radius * 0.5, g) - g * 0.5).abs() < 1e-9);
         assert_eq!(planet.gravity_at(0.0, g), 0.0);
         assert!((planet.gravity_direction(Vec3::Y) - (-Vec3::Y)).length() < 1e-12);
+    }
+
+    #[test]
+    fn shell_blocks_are_valid_frustums_at_every_depth() {
+        for radius in [64u64, 500, EARTH] {
+            let planet = Planet::new(radius, 5);
+            for s in ALL_SECTORS {
+                for (u, v) in [(-0.7, 0.2), (0.1, 0.8), (0.45, -0.3), (0.97, -0.94)] {
+                    for frac in [0.60, 0.72, 0.85, 0.98] {
+                        let p = s.position(u, v, planet.radius * frac);
+                        if planet.block_at(p).is_solid() {
+                            let g = planet
+                                .geometry_at(p)
+                                .unwrap_or_else(|| panic!("no geometry at r={}", p.length()));
+                            assert!(g.is_valid(), "invalid shape at r={}: {:?}", p.length(), g);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_collapsed_central_frustum_is_rejected_not_returned() {
+        let shells = ShellModel::default();
+        // Shell 0 has cells meeting at radius zero: every wedge is degenerate.
+        let central = BlockAddress {
+            sector: Sector::PosX,
+            shell: 0,
+            i: 12,
+            j: 12,
+            layer: 0,
+        };
+        assert!(!BlockShape::from_address(&shells, &central).is_valid());
+
+        let planet = Planet::new(64, 1);
+        let inside_core = planet.address_space_of(Vec3::X * 8.0);
+        assert!(inside_core.is_core());
+        assert!(matches!(
+            planet.address_space_of(Vec3::X * 20.0),
+            AddressSpace::Shell(_)
+        ));
+    }
+
+    #[test]
+    fn tiny_planets_keep_their_surface_above_their_centre() {
+        // Fixed +-64-block amplitude used to put a 64-block planet's "surface"
+        // below r = 0, which then produced nonsense depths.
+        let planet = Planet::new(64, 9);
+        for s in ALL_SECTORS {
+            let dir = s.position(0.3, -0.2, 1.0);
+            assert!(planet.surface_radius_at(dir) > planet.radius * 0.9);
+            assert!(planet.surface_radius_at(dir) < planet.radius * 1.1);
+        }
+        assert!(planet.block_at(Vec3::X * 60.0).is_solid());
+    }
+
+    #[test]
+    fn one_block_at_a_shell_boundary_is_four_above_and_one_below() {
+        let shells = ShellModel::default();
+        let k = 6;
+        let n = shells.resolution(k);
+        let a = BlockAddress {
+            sector: Sector::PosZ,
+            shell: k,
+            i: n / 3,
+            j: n / 4,
+            layer: shells.layers(k) - 1,
+        };
+        let up = a.above(&shells);
+        assert_eq!(up.len(), 4);
+        for child in &up {
+            assert_eq!(child.shell, k + 1);
+            assert_eq!(child.layer, 0);
+            assert_eq!(child.below(&shells), vec![a]);
+            assert!(BlockShape::from_address(&shells, child).is_valid());
+        }
+    }
+
+    #[test]
+    fn absurd_radii_return_no_geometry_instead_of_nan() {
+        // f64 stops resolving single blocks beyond 2^53; the model must refuse
+        // those shapes rather than hand the renderer NaN or zero-width cells.
+        let planet = Planet::new(9_000_000_000_000_000_000, 3);
+        let p = Vec3::X * planet.radius;
+        let geometry = planet.geometry_at(p * 0.99);
+        assert!(geometry.is_none() || geometry.map(|g| g.is_valid()).unwrap_or(false));
+        assert!(!planet
+            .geometry_at(p * 0.99)
+            .map(|g| g.min_edge())
+            .unwrap_or(1.0)
+            .is_nan());
     }
 }

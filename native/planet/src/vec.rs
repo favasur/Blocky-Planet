@@ -77,6 +77,10 @@ impl Vec3 {
         Vec3::new(self.x.floor(), self.y.floor(), self.z.floor())
     }
 
+    pub fn is_finite(self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
+    }
+
     /// The coordinate with the largest absolute value: the cube-face axis the
     /// quad sphere projects this point onto.
     pub fn dominant(self) -> (usize, f64) {
