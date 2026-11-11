@@ -114,7 +114,13 @@ mod tests {
             // Nothing panics at the outer edge, into space, or at the core.
             assert_eq!(planet.block_at(p * 1.5), Block::Air);
             assert_eq!(planet.block_at(Vec3::ZERO), Block::Air);
-            assert!(planet.block_at(p * 0.99).is_solid());
+            let surface = planet.surface_radius_at(Vec3::X);
+            assert!(planet.block_at(Vec3::X * (surface - 1.0)).is_solid());
+            // Below the crust is void, not millions of deepslate blocks.
+            // (Beyond 2^53 a 300-block subtraction no longer changes the f64.)
+            if surface - 300.0 != surface {
+                assert_eq!(planet.block_at(Vec3::X * (surface - 300.0)), Block::Air);
+            }
         }
     }
 
@@ -165,7 +171,8 @@ mod tests {
         assert_eq!(planet.block_at(p), Block::Grass);
         assert_eq!(planet.block_at(dir * (surface - 2.0)), Block::Dirt);
         assert_eq!(planet.block_at(dir * (surface - 40.0)), Block::Stone);
-        assert_eq!(planet.block_at(dir * (surface - 300.0)), Block::Deepslate);
+        assert_eq!(planet.block_at(dir * (surface - 100.0)), Block::Deepslate);
+        assert_eq!(planet.block_at(dir * (surface - 300.0)), Block::Air);
         assert_eq!(
             planet.block_at(Vec3::new(1.0, 2.0, 3.0) * 10.0),
             planet.block_at(Vec3::new(1.0, 2.0, 3.0) * 10.0)
@@ -177,8 +184,12 @@ mod tests {
         let planet = Planet::new(EARTH, 42);
         assert_eq!(planet.block_at(Vec3::ZERO), Block::Air);
         assert_eq!(
-            planet.block_at(Vec3::X * (planet.radius * 0.59)),
+            planet.block_at(Vec3::X * (planet.radius * 0.60 - 2.0)),
             Block::Bedrock
+        );
+        assert_eq!(
+            planet.block_at(Vec3::X * (planet.radius * 0.50)),
+            Block::Air
         );
     }
 
@@ -242,8 +253,10 @@ mod tests {
             let planet = Planet::new(radius, 5);
             for s in ALL_SECTORS {
                 for (u, v) in [(-0.7, 0.2), (0.1, 0.8), (0.45, -0.3), (0.97, -0.94)] {
-                    for frac in [0.60, 0.72, 0.85, 0.98] {
-                        let p = s.position(u, v, planet.radius * frac);
+                    let dir = s.position(u, v, 1.0);
+                    let surface = planet.surface_radius_at(dir);
+                    for depth in [1.0, 4.0, 40.0, 100.0, 126.0] {
+                        let p = dir * (surface - depth);
                         if planet.block_at(p).is_solid() {
                             let g = planet
                                 .geometry_at(p)
@@ -292,6 +305,52 @@ mod tests {
     }
 
     #[test]
+    fn a_column_is_a_few_hundred_solid_blocks_not_millions() {
+        for radius in [500u64, EARTH, 9_000_000_000_000_000_000] {
+            let planet = Planet::new(radius, 2);
+            for s in ALL_SECTORS {
+                let plan = planet.column_plan(s.position(0.2, -0.3, 1.0));
+                let thickness = plan.solid_thickness();
+                assert!(thickness <= 400.0, "{thickness} solid blocks at r={radius}");
+                assert!(thickness.is_finite());
+                // The full radius is orders of magnitude larger; generation must
+                // never walk it block by block.
+                if planet.radius > 10_000.0 {
+                    assert!(planet.radius / thickness > 10_000.0);
+                }
+                let solid = plan
+                    .solid_spans()
+                    .iter()
+                    .all(|(a, b)| a.is_finite() && b.is_finite() && b >= a);
+                assert!(solid);
+            }
+        }
+    }
+
+    #[test]
+    fn a_column_plan_matches_per_block_lookup() {
+        let planet = Planet::new(EARTH, 11);
+        for s in ALL_SECTORS {
+            for (u, v) in [(0.1, 0.4), (-0.6, 0.8)] {
+                let dir = s.position(u, v, 1.0);
+                let plan = planet.column_plan(dir);
+                for depth in [0.5, 2.0, 20.0, 120.0, 200.0] {
+                    let r = plan.surface - depth;
+                    assert_eq!(planet.block_at(dir * r), plan.block_at(planet.seed, dir, r));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_larger_than_the_budget_is_refused() {
+        let huge = LocalWindow::new([-1000, -1_000_000, -1000], [1000, 1_000_000, 1000]);
+        assert!(huge.checked().is_err());
+        let normal = LocalWindow::new([-8, -16, -8], [8, 8, 8]);
+        assert!(normal.checked().is_ok());
+        assert_eq!(normal.volume(), 17 * 25 * 17);
+    }
+
     fn a_shell_chunk_decomposes_and_recomposes_an_address() {
         let shells = ShellModel::default();
         let a = BlockAddress {
@@ -336,13 +395,10 @@ mod tests {
         // f64 stops resolving single blocks beyond 2^53; the model must refuse
         // those shapes rather than hand the renderer NaN or zero-width cells.
         let planet = Planet::new(9_000_000_000_000_000_000, 3);
-        let p = Vec3::X * planet.radius;
-        let geometry = planet.geometry_at(p * 0.99);
+        let surface = planet.surface_radius_at(Vec3::X);
+        let p = Vec3::X * (surface - 20.0);
+        let geometry = planet.geometry_at(p);
         assert!(geometry.is_none() || geometry.map(|g| g.is_valid()).unwrap_or(false));
-        assert!(!planet
-            .geometry_at(p * 0.99)
-            .map(|g| g.min_edge())
-            .unwrap_or(1.0)
-            .is_nan());
+        assert!(!geometry.map(|g| g.min_edge()).unwrap_or(1.0).is_nan());
     }
 }

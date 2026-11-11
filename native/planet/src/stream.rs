@@ -10,6 +10,18 @@
 use crate::frame::LocalFrame;
 use crate::planet::{Block, Planet};
 
+/// Hard ceiling on a window the game may ask for. Four million block
+/// positions is a 512 x 512 footprint 16 blocks deep, or 128 x 128 x 256.
+/// Anything larger is a bug in the caller (usually a full radial column), not
+/// a render distance.
+pub const MAX_WINDOW_BLOCKS: u64 = 4_194_304;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowError {
+    TooLarge { blocks: u64, max: u64 },
+    Inverted,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct LocalWindow {
     pub min: [i32; 3],
@@ -22,10 +34,25 @@ impl LocalWindow {
     }
 
     pub fn volume(&self) -> u64 {
-        let dx = (self.max[0] - self.min[0] + 1).max(0) as u64;
-        let dy = (self.max[1] - self.min[1] + 1).max(0) as u64;
-        let dz = (self.max[2] - self.min[2] + 1).max(0) as u64;
-        dx * dy * dz
+        let dx = (self.max[0] as i64 - self.min[0] as i64 + 1).max(0) as u64;
+        let dy = (self.max[1] as i64 - self.min[1] as i64 + 1).max(0) as u64;
+        let dz = (self.max[2] as i64 - self.min[2] as i64 + 1).max(0) as u64;
+        dx.saturating_mul(dy).saturating_mul(dz)
+    }
+
+    /// Reject a window that would make the game iterate millions of blocks.
+    pub fn checked(self) -> Result<Self, WindowError> {
+        if self.max[0] < self.min[0] || self.max[1] < self.min[1] || self.max[2] < self.min[2] {
+            return Err(WindowError::Inverted);
+        }
+        let blocks = self.volume();
+        if blocks > MAX_WINDOW_BLOCKS {
+            return Err(WindowError::TooLarge {
+                blocks,
+                max: MAX_WINDOW_BLOCKS,
+            });
+        }
+        Ok(self)
     }
 
     /// Call `f` for every block in the window, with its local position and the

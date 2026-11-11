@@ -136,12 +136,25 @@ nothing until a block is actually written.
 ### Terrain
 
 Sampled from seeded 3D value-noise FBM **on the unit sphere**, not from a 2D
-height map — no seam and no latitude distortion. From outside in:
+height map — no seam and no latitude distortion. The planet is built from
+fixed-thickness bands, not a solid ball:
 
 ```
-space → water (below sea level) → grass → dirt → stone → deepslate
-      → nether rack/lava ring at 0.70 R → bedrock core at 0.60 R → hollow void
+space / water → grass → dirt → stone → deepslate   (crust, at most 128 blocks)
+              → void                                (no blocks generated)
+              → netherrack / lava ring at 0.70 R    (at most 256 blocks thick)
+              → void
+              → bedrock core shell at 0.60 R        (8 blocks thick)
+              → hollow void to r = 0
 ```
+
+Those bands are the generation fix, not a shortcut. At Earth size a column
+holds **392 solid blocks** against a **6,371,000-block radius** — 16,253× less
+work than walking the radius. `Planet::column_plan` samples the surface noise
+once per column and answers every block from the plan; `planet-lab` measures a
+**36.5×** speedup on a 16×16×64 chunk in a debug build (18.8 ms → 0.5 ms).
+That is the difference between the Java version's 3.26 billion iterations per
+chunk and 16,384.
 
 ### Gravity
 
@@ -184,7 +197,7 @@ blocky-planet/
 The model has no dependencies, so it builds and tests anywhere:
 
 ```bash
-cargo test                 # 17 model tests
+cargo test                 # 25 model tests
 cargo run -p planet-lab    # Earth-sized planet, cross-section, timing
 cargo run -p planet-lab -- 500 7
 cargo run -p planet-lab -- 12742000 42
@@ -218,7 +231,8 @@ anchored to the planet's `+X` surface until the streaming rebase lands:
 * [x] quad-sphere sectors with a right-handed basis and seam flip
 * [x] doubling shells that do not overflow (the Java version's fatal bug)
 * [x] block addressing and chunk decomposition
-* [x] seamless 3D terrain, water, deepslate, Nether ring, hollow bedrock core
+* [x] seamless 3D terrain in fixed-thickness bands (392 solid blocks per
+      column at Earth size), Nether ring, hollow bedrock core
 * [x] validated frustum shapes, Cartesian core tier, 1↔4 shell neighbours
 * [x] local frame + floating origin + window sampling, tested at Earth scale
 * [x] native bundle, HUD and commands written against Horizon's real hook

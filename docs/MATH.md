@@ -150,20 +150,25 @@ surface(dir) = R + A · fbm(dir · 3, seed, 4),   A = 64 blocks
 ```
 
 The direction is a unit vector, so the noise wraps perfectly: one ocean, no
-seam. Depth below the surface picks the block:
+seam. The solid planet is a set of fixed-thickness bands, not a solid ball:
 
-| depth | block |
-| --- | --- |
-| `r > surface`, `r ≤ sea` | water |
-| `r > surface` | air |
-| `0 … 1` | grass |
-| `1 … 4` | dirt |
-| `4 … 96` | stone |
-| `> 96` | deepslate |
+| band | radial range | blocks |
+| --- | --- | --- |
+| crust | `surface − 128 … surface` | grass, dirt, stone, deepslate |
+| void | below the crust | none generated |
+| Nether ring | `0.70 R … 0.70 R + min(0.02 R, 256)` | netherrack, lava pockets |
+| void | below the ring | none generated |
+| core shell | `0.60 R − 8 … 0.60 R` | bedrock |
+| hollow | `0 … 0.60 R − 8` | none |
 
-Special shells override depth: the Nether ring (`0.70 R … 0.70 R + 0.02 R`) is
-netherrack with lava pockets, and `0.58 R … 0.60 R` is a bedrock core around a
-hollow void.
+Within the crust, depth picks the block: `< 1` grass, `< 4` dirt, `< 96`
+stone, otherwise deepslate. Crust thickness is `clamp(0.20 R, 8, 128)`.
+
+This is what keeps generation finite. Total solid thickness per column is at
+most `128 + 256 + 8 = 392` blocks regardless of radius; at Earth size that is
+16,253× less than the radius. `ColumnPlan` stores the surface once per column
+and classifies radii from it, so noise is sampled once per column, not once
+per block.
 
 ## 5. Gravity
 

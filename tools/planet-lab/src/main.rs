@@ -66,15 +66,21 @@ fn main() {
 
     // Six sectors, each sampled at its centre: the same surface rules apply,
     // with no pole and no seam in the middle of a face.
-    let hollow = planet.radius * 0.58;
-    let wall = Vec3::X * hollow;
+    let core_shell = Vec3::X * (planet.radius * 0.60 - 2.0);
     println!(
-        "  block at 0.58R    {}  (shell {}, width at the hollow wall)",
-        match planet.geometry_at(wall) {
+        "  block at 0.60R    {}  (shell {}, core shell)",
+        match planet.geometry_at(core_shell) {
             Some(g) => g.describe(),
             None => "no solid geometry".to_string(),
         },
-        planet.address_of(wall).shell
+        planet.address_of(core_shell).shell
+    );
+    let column = planet.column_plan(Vec3::X);
+    let thickness = column.solid_thickness();
+    println!(
+        "  solid per column  {thickness:.0} blocks of {} ({:.0}x less to build)",
+        thousands(radius),
+        planet.radius / thickness
     );
 
     print!("  sector surfaces  ");
@@ -146,6 +152,47 @@ fn main() {
         "  local origin in planet space: ({:.0}, {:.0}, {:.0})",
         frame.origin.x, frame.origin.y, frame.origin.z
     );
+
+    // A 16x16x64 chunk (the surface band a renderer would ask for), once
+    // sampling noise per block and once sampling it once per column.
+    let chunk_blocks = 16 * 16 * 64;
+    let t0 = Instant::now();
+    let mut naive_solid = 0u32;
+    for x in 0..16 {
+        for z in 0..16 {
+            for y in 0..64 {
+                let d = (Vec3::new(x as f64, y as f64, z as f64) * 0.02 + Vec3::X).normalized();
+                if planet.block_at(d * (surf_x - 0.5 - y as f64)).is_solid() {
+                    naive_solid += 1;
+                }
+            }
+        }
+    }
+    let naive_time = t0.elapsed();
+    let t1 = Instant::now();
+    let mut planned_solid = 0u32;
+    for x in 0..16 {
+        for z in 0..16 {
+            let d = (Vec3::new(x as f64, 0.0, z as f64) * 0.02 + Vec3::X).normalized();
+            let plan = planet.column_plan(d);
+            for y in 0..64 {
+                if plan
+                    .block_at(planet.seed, d, surf_x - 0.5 - y as f64)
+                    .is_solid()
+                {
+                    planned_solid += 1;
+                }
+            }
+        }
+    }
+    let planned_time = t1.elapsed();
+    println!(
+        "\n{chunk_blocks} blocks (16x16x64): per-block noise {:.1} ms, per-column {:.1} ms ({:.1}x)",
+        naive_time.as_secs_f64() * 1000.0,
+        planned_time.as_secs_f64() * 1000.0,
+        naive_time.as_secs_f64() / planned_time.as_secs_f64()
+    );
+    println!("  solid: naive {naive_solid}, planned {planned_solid}");
 
     let n = 200_000u32;
     let start = Instant::now();

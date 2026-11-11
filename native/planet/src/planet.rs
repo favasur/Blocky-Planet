@@ -3,10 +3,19 @@
 //! A radius is an `f64` over a `u64` input, so a planet may be a 500-block
 //! moon or 9.2e18 blocks across; the shell model only needs ~log2(r) shells.
 //!
-//! Terrain amplitude and sea depth scale with the radius instead of being
-//! constants. With a fixed +-64-block amplitude a 64-block planet had its
-//! "surface" below its own centre, which is exactly the kind of number that
-//! turns into broken geometry further down the line.
+//! # Why this does not freeze
+//!
+//! The failed Java version iterated every Y from the surface to the core and
+//! called noise per block: 12.7 million Y values times 256 columns, 3.26
+//! billion iterations per chunk. The planet is not solid, so that work was
+//! almost entirely air.
+//!
+//! Here the solid part is a set of **fixed-thickness bands**, as in the
+//! article's structure: a crust (at most 128 blocks), a Nether ring (at most
+//! 256 thick), and an 8-block core shell. Everything between them is void.
+//! A whole column therefore has a few hundred solid blocks regardless of the
+//! radius, and [`Planet::column_plan`] computes the surface noise **once per
+//! column** instead of once per block.
 
 use crate::address::{AddressSpace, BlockAddress, CoreAddress};
 use crate::noise;
@@ -16,6 +25,11 @@ use crate::vec::Vec3;
 
 /// Salt for the Nether ring's noise, so it does not echo the surface.
 const NETHER_SALT: u64 = 0x4E45_5448_4552_0001;
+
+/// Thickest the surface crust ever gets, in blocks.
+pub const MAX_CRUST: f64 = 128.0;
+/// Thickness of the solid bedrock shell around the hollow core.
+pub const CORE_SHELL: f64 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Block {
@@ -47,6 +61,85 @@ impl Block {
 
     pub fn is_solid(self) -> bool {
         !matches!(self, Block::Air | Block::Water | Block::Lava)
+    }
+}
+
+/// Radial solid bands for one column, computed once.
+#[derive(Clone, Copy, Debug)]
+pub struct ColumnPlan {
+    pub surface: f64,
+    pub sea: f64,
+    /// `(inner, outer)` of the surface crust.
+    pub crust: (f64, f64),
+    /// `(inner, outer)` of the Nether ring, when it fits below the crust.
+    pub ring: Option<(f64, f64)>,
+    /// `(inner, outer)` of the solid core shell above the hollow centre.
+    pub core: Option<(f64, f64)>,
+}
+
+impl ColumnPlan {
+    /// Solid radial spans, outermost first.
+    pub fn solid_spans(&self) -> Vec<(f64, f64)> {
+        let mut spans = vec![self.crust];
+        if let Some(r) = self.ring {
+            spans.push(r);
+        }
+        if let Some(c) = self.core {
+            spans.push(c);
+        }
+        spans
+    }
+
+    /// Total solid thickness of the column. Independent of the planet radius,
+    /// which is the whole point: a few hundred blocks, not millions.
+    pub fn solid_thickness(&self) -> f64 {
+        self.solid_spans()
+            .iter()
+            .map(|(inner, outer)| (outer - inner).max(0.0))
+            .sum()
+    }
+
+    /// Classify a radius in this column without resampling the surface noise.
+    pub fn block_at(&self, seed: u64, dir: Vec3, r: f64) -> Block {
+        if r > self.surface {
+            return if r <= self.sea {
+                Block::Water
+            } else {
+                Block::Air
+            };
+        }
+
+        if r >= self.crust.0 && r <= self.crust.1 {
+            let depth = self.surface - r;
+            return if depth < 1.0 {
+                Block::Grass
+            } else if depth < 4.0 {
+                Block::Dirt
+            } else if depth < 96.0 {
+                Block::Stone
+            } else {
+                Block::Deepslate
+            };
+        }
+
+        if let Some((inner, outer)) = self.ring {
+            if r >= inner && r <= outer {
+                let n = noise::fbm(dir * 12.0, seed ^ NETHER_SALT, 3);
+                return if n > 0.45 {
+                    Block::Lava
+                } else {
+                    Block::Netherrack
+                };
+            }
+        }
+
+        if let Some((inner, outer)) = self.core {
+            if r >= inner && r <= outer {
+                return Block::Bedrock;
+            }
+        }
+
+        Block::Air
     }
 }
 
@@ -86,6 +179,39 @@ impl Planet {
         self.radius + n * self.terrain_amplitude
     }
 
+    /// Crust thickness: relative for tiny worlds, capped at [`MAX_CRUST`].
+    pub fn crust_thickness(&self) -> f64 {
+        (self.radius * 0.20).clamp(8.0, MAX_CRUST)
+    }
+
+    /// Radial bands for one direction. One noise sample per column.
+    pub fn column_plan(&self, dir: Vec3) -> ColumnPlan {
+        let surface = self.surface_radius_at(dir);
+        let sea = self.radius - self.sea_level_drop;
+        let crust_outer = surface;
+        let crust_inner = (surface - self.crust_thickness()).max(0.0);
+
+        let core_outer = self.radius * 0.60;
+        let core_inner = (core_outer - CORE_SHELL).max(self.radius * 0.58);
+        let core = (core_outer > core_inner && core_outer < crust_inner)
+            .then_some((core_inner, core_outer));
+
+        let ring_inner = self.radius * 0.70;
+        let ring_outer =
+            (ring_inner + (self.radius * 0.02).clamp(2.0, 256.0)).min(crust_inner - 1.0);
+        let below_core = core.map(|(_, outer)| outer).unwrap_or(0.0);
+        let ring = (ring_inner > below_core && ring_outer > ring_inner)
+            .then_some((ring_inner, ring_outer));
+
+        ColumnPlan {
+            surface,
+            sea,
+            crust: (crust_inner, crust_outer),
+            ring,
+            core,
+        }
+    }
+
     /// The block at a planet-space point. `p` may be at any distance.
     pub fn block_at(&self, p: Vec3) -> Block {
         let r = p.length();
@@ -93,47 +219,7 @@ impl Planet {
             return Block::Air;
         }
         let dir = p / r;
-
-        let surface = self.surface_radius_at(dir);
-        let sea = self.radius - self.sea_level_drop;
-
-        if r > surface {
-            return if r <= sea { Block::Water } else { Block::Air };
-        }
-
-        // Hollow core, as in the article: digging all the way down reaches
-        // void, with a bedrock shell around it.
-        let hollow = self.radius * 0.58;
-        let core = self.radius * 0.60;
-        if r < hollow {
-            return Block::Air;
-        }
-        if r < core {
-            return Block::Bedrock;
-        }
-
-        // The Nether as a spherical ring deep inside the planet.
-        let ring_inner = self.radius * 0.70;
-        let ring_outer = ring_inner + (self.radius * 0.02).clamp(2.0, 256.0);
-        if r >= ring_inner && r <= ring_outer {
-            let n = noise::fbm(dir * 12.0, self.seed ^ NETHER_SALT, 3);
-            return if n > 0.45 {
-                Block::Lava
-            } else {
-                Block::Netherrack
-            };
-        }
-
-        let depth = surface - r;
-        if depth < 1.0 {
-            Block::Grass
-        } else if depth < 4.0 {
-            Block::Dirt
-        } else if depth < 96.0 {
-            Block::Stone
-        } else {
-            Block::Deepslate
-        }
+        self.column_plan(dir).block_at(self.seed, dir, r)
     }
 
     /// The block's address (sector, shell, chunk, block).

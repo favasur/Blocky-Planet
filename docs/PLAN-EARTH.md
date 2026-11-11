@@ -77,6 +77,15 @@ Full columns to the 2032-block ceiling would be 32×32×127 ≈ 130k chunks and 
 not needed: only the band near the surface is materialized, with the planet
 model answering everything deeper on demand.
 
+**Why this does not freeze.** Solid geometry is banded, not continuous: a
+128-block crust, a 256-block Nether ring, an 8-block core shell, and void
+between them. A column therefore has 392 solid blocks at Earth size, not
+6.37 million. `ColumnPlan` samples the surface noise once per column and
+classifies every radius from it; a 16×16×64 chunk measures 0.5 ms against
+18.8 ms for per-block noise in a debug build. A caller that asks for a
+full-radius window is refused by `LocalWindow::checked` (4,194,304 blocks),
+so the Java version's 3.26-billion-iteration chunk cannot be expressed.
+
 The hard part is the **rebase**. When the window moves, blocks must be re-keyed
 from planet space into the new local frame and remeshed. Rebasing on a coarse
 lattice (e.g. every 256 blocks) reuses most chunk content; rebasing every step
