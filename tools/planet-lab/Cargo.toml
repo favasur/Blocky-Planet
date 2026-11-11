@@ -1,0 +1,13 @@
+[package]
+name = "planet-lab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Inspect the Blocky Planet model without launching the game."
+
+[[bin]]
+name = "planet-lab"
+path = "src/main.rs"
+
+[dependencies]
+blocky_planet_core = { path = "../../native/planet" }

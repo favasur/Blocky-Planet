@@ -1,0 +1,10 @@
+[package]
+name = "blocky_planet_core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Unbounded spherical-planet model: quad-sphere sectors, shells, block addresses, terrain and local frames."
+
+# Deliberately dependency-free: this crate is compiled into Horizon as a native
+# mod crate, and must only use crates already present in Horizon's Cargo.lock.
+[dependencies]

@@ -1,0 +1,49 @@
+# Blocky Planet — a native Horizon mod (.hnmod).
+#
+# A planet of arbitrary size cannot be a bigger level: Horizon packs Y in 12
+# bits and caps a level at 2032 blocks (docs/world-height.md). The mod keeps the
+# planet in 64-bit planet space (the `planet` crate) and hands the game only a
+# small, gravity-aligned local window (a floating origin). See README.md.
+[mod]
+id = "blocky_planet"
+version = "0.1.0"
+priority = 100
+
+# Raw targets below (`native_hud`, `native_command`) pin a Horizon commit.
+# Unpinned, the launcher builds on the instance's own commit; pin the Nightly
+# you tested on for a release:
+# [compatibility]
+# horizon_revision = "<40 lowercase hex characters>"
+
+# The model, compiled once into its own crate and reused across rebuilds.
+[[crate]]
+id = "planet"
+path = "planet"
+
+[[module]]
+id = "runtime"
+file = "crates/horizon-client/src/game.rs"
+name = "blocky_planet"
+source = "runtime.rs"
+
+[[injection]]
+id = "hud"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_hud"
+helper = "hud.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+  { name = "corners", ty = "&mut horizon_client::extras_hud::Corners", value = "&mut *corners" },
+]
+
+[[injection]]
+id = "command"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_command"
+helper = "command.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "command", ty = "&str", value = "command" },
+  { name = "ran", ty = "&mut bool", value = "&mut *ran" },
+]
